@@ -1,0 +1,918 @@
+# ESPECIFICAÇÃO TÉCNICA MESTRA — PLATAFORMA WEB DE ENSINO DE INGLÊS
+
+## 1. Objetivo técnico e diretrizes obrigatórias
+
+Desenvolva uma plataforma web completa para ensino de inglês, com administração de usuários, professores e alunos, gestão de conteúdos e materiais didáticos, cursos, avaliações, agendamento de aulas, videoaulas gravadas e integrações com Google Calendar e Zoom.
+
+A aplicação deve ter arquitetura organizada, código sustentável, segurança aplicada no backend, interface responsiva e um Design System reutilizável.
+
+**Regras obrigatórias de desenvolvimento:**
+
+- Não criar somente protótipos ou telas estáticas.
+- Não simular operações que deveriam salvar dados reais.
+- Não deixar botões sem funcionamento.
+- Não armazenar vídeos diretamente no Firestore.
+- Não confiar exclusivamente na interface para controlar permissões.
+- Não permitir que um usuário se torne professor ou administrador pelo cadastro público.
+- Não permitir que alunos escolham, alterem ou removam seus próprios vínculos com professores.
+- Não permitir acesso a conteúdos, notas, documentos ou dados privados de outros alunos.
+- Implementar as funcionalidades solicitadas e documentar claramente qualquer limitação externa, custo ou requisito de configuração.
+- Não reduzir o escopo funcional definido para o MVP. A implementação pode ser realizada internamente em etapas técnicas, mas o resultado esperado é o conjunto de funcionalidades especificado neste documento.
+
+---
+
+## 2. Stack tecnológica obrigatória
+
+Utilize tecnologias compatíveis entre si e versões estáveis no momento da implementação.
+
+| Camada | Tecnologia |
+|---|---|
+| Linguagem principal | TypeScript com `strict: true` |
+| Frontend | React + Next.js, App Router |
+| Estilização | Tailwind CSS |
+| Componentes visuais | shadcn/ui, Radix UI quando apropriado |
+| Formulários | React Hook Form |
+| Validação | Zod |
+| Autenticação | Firebase Authentication |
+| Banco de dados | Cloud Firestore |
+| Arquivos e vídeos | Cloud Storage for Firebase |
+| Backend | Next.js Route Handlers e Firebase Cloud Functions |
+| Autorização | Firebase Security Rules e verificações explícitas no backend |
+| Integração de agenda | Google Calendar API |
+| Videoconferência | Zoom API com OAuth |
+| Testes unitários | Vitest |
+| Testes de interface e fluxo | Playwright |
+| Testes de segurança do Firebase | Firebase Emulator Suite |
+| Qualidade de código | ESLint e Prettier |
+| Versionamento | Git |
+| Deploy | Firebase App Hosting ou alternativa compatível, validada tecnicamente |
+
+Utilize o Firebase como infraestrutura principal para autenticação, dados, arquivos e funções de backend.
+
+Não introduza microsserviços, múltiplos bancos ou ferramentas desnecessárias sem uma justificativa técnica documentada.
+
+### 2.1 Organização do projeto
+
+Utilize uma estrutura modular por domínio, evitando concentrar toda a lógica em páginas, componentes ou arquivos gigantes.
+
+Estrutura de referência:
+
+```text
+src/
+├── app/
+│   ├── (public)/
+│   ├── (auth)/
+│   └── (dashboard)/
+│       ├── admin/
+│       ├── professor/
+│       └── aluno/
+├── modules/
+│   ├── authentication/
+│   ├── users/
+│   ├── administration/
+│   ├── teachers/
+│   ├── students/
+│   ├── relationships/
+│   ├── content/
+│   ├── courses/
+│   ├── assessments/
+│   ├── scheduling/
+│   ├── bookings/
+│   ├── media/
+│   ├── notifications/
+│   └── integrations/
+│       ├── google-calendar/
+│       └── zoom/
+├── shared/
+│   ├── components/
+│   ├── design-system/
+│   ├── hooks/
+│   ├── schemas/
+│   ├── types/
+│   └── utils/
+├── infrastructure/
+│   └── firebase/
+└── tests/
+
+functions/
+├── src/
+│   ├── bookings/
+│   ├── calendar/
+│   ├── zoom/
+│   ├── notifications/
+│   ├── media/
+│   └── scheduled-jobs/
+
+firebase/
+├── firestore.rules
+├── firestore.indexes.json
+├── storage.rules
+└── firebase.json
+```
+
+A estrutura pode ser adaptada quando necessário, mas deve preservar a separação de responsabilidades.
+
+### 2.2 Princípios de arquitetura
+
+Adote uma Clean Architecture proporcional ao tamanho do projeto, sem excesso de abstrações.
+
+Separe:
+
+1. **Apresentação:** páginas, componentes, formulários e estados visuais.
+2. **Aplicação:** casos de uso e orquestração das operações.
+3. **Domínio:** entidades, regras de negócio, políticas e validações essenciais.
+4. **Infraestrutura:** Firebase, APIs externas, persistência, armazenamento e serviços de terceiros.
+
+Exemplo de fluxo:
+
+`Página → Caso de uso → Regra de negócio → Repositório → Firestore`
+
+Para operações sensíveis, o fluxo deve passar pelo backend autenticado e autorizado.
+
+Não acesse o Firestore indiscriminadamente de qualquer componente. Centralize o acesso por módulos e repositórios bem definidos.
+
+---
+
+## 3. Modelagem do banco de dados
+
+Utilize Cloud Firestore como banco NoSQL principal.
+
+Embora a modelagem abaixo utilize o conceito de tabelas para facilitar o entendimento, a implementação deve usar **coleções e documentos do Firestore**, com relacionamentos por IDs, referências explícitas e documentos auxiliares quando necessário.
+
+Não tente reproduzir um banco SQL inteiro dentro de uma única coleção ou documento.
+
+### 3.1 Convenções gerais
+
+- IDs gerados de forma segura e únicos.
+- Datas armazenadas como timestamps do Firestore, preferencialmente em UTC.
+- Interface apresentando horários no fuso configurado pelo usuário, inicialmente `America/Sao_Paulo`.
+- Valores monetários, caso sejam adicionados, devem evitar cálculos com ponto flutuante sem controle de precisão.
+- Campos de criação e atualização: `createdAt`, `updatedAt`.
+- Campos de autoria quando aplicável: `createdBy`, `updatedBy`.
+- Exclusões de dados acadêmicos devem considerar histórico, auditoria e retenção.
+- Usar paginação para listagens extensas.
+- Criar índices compostos conforme as consultas reais da aplicação.
+- Evitar documentos que cresçam indefinidamente ou ultrapassem os limites do Firestore.
+- Nunca armazenar senhas, tokens de acesso ou segredos de integração em documentos acessíveis ao frontend.
+
+### 3.2 Coleções principais
+
+#### A. `users` — usuários da plataforma
+
+Documento: `users/{userId}`
+
+| Campo | Tipo | Descrição |
+|---|---|---|
+| `uid` | string | ID do Firebase Authentication |
+| `name` | string | Nome completo |
+| `email` | string | E-mail normalizado |
+| `photoURL` | string ou null | Foto de perfil |
+| `role` | string | `admin`, `teacher` ou `student` |
+| `status` | string | `active`, `inactive`, `suspended` ou `pending` |
+| `timezone` | string | Fuso horário preferencial |
+| `createdAt` | timestamp | Criação |
+| `updatedAt` | timestamp | Última atualização |
+| `createdBy` | string ou null | Usuário responsável pela criação administrativa |
+
+O papel e o status devem ser definidos ou alterados exclusivamente por operações administrativas autorizadas no backend.
+
+O cadastro público deve criar somente usuários com papel `student`. Nunca aceite o campo `role` enviado pelo cliente como fonte de autorização.
+
+Para privilégios administrativos, utilize custom claims controladas pelo backend quando apropriado, sincronizadas com os dados administrativos. Nenhum cliente pode definir suas próprias claims.
+
+#### B. `teacherProfiles` — perfis de professores
+
+Documento: `teacherProfiles/{teacherId}`
+
+| Campo | Tipo | Descrição |
+|---|---|---|
+| `teacherId` | string | Mesmo ID do usuário |
+| `bio` | string | Apresentação profissional |
+| `specialties` | array de strings | Especialidades |
+| `languages` | array de strings | Idiomas |
+| `timezone` | string | Fuso do professor |
+| `bookingSettings` | map | Regras de agendamento |
+| `isAcceptingStudents` | boolean | Aceita novos vínculos |
+| `createdAt` | timestamp | Criação |
+| `updatedAt` | timestamp | Atualização |
+
+Somente o professor autorizado ou o administrador pode modificar os campos permitidos. Alterações de permissões continuam exclusivas do administrador.
+
+#### C. `studentProfiles` — perfis de alunos
+
+Documento: `studentProfiles/{studentId}`
+
+| Campo | Tipo | Descrição |
+|---|---|---|
+| `studentId` | string | Mesmo ID do usuário |
+| `englishLevel` | string ou null | Nível de inglês |
+| `learningGoals` | array | Objetivos do aluno |
+| `notes` | string ou null | Informações permitidas para acompanhamento |
+| `createdAt` | timestamp | Criação |
+| `updatedAt` | timestamp | Atualização |
+
+Informações acadêmicas privadas devem ter autorização própria. Não disponibilize observações internas do professor para o aluno automaticamente.
+
+#### D. `teacherStudentRelationships` — vínculo entre professor e aluno
+
+Documento: `teacherStudentRelationships/{relationshipId}`
+
+Esta coleção é obrigatória. Não utilize apenas um campo `teacherId` dentro do aluno como fonte exclusiva da verdade.
+
+| Campo | Tipo | Descrição |
+|---|---|---|
+| `studentId` | string | ID do aluno |
+| `teacherId` | string | ID do professor |
+| `status` | string | `active` ou `ended` |
+| `assignedBy` | string | Administrador ou professor responsável |
+| `assignedAt` | timestamp | Data do vínculo |
+| `endedAt` | timestamp ou null | Data do encerramento |
+| `endedBy` | string ou null | Responsável pelo encerramento |
+| `endReason` | string ou null | Motivo, se informado |
+| `createdAt` | timestamp | Criação |
+| `updatedAt` | timestamp | Atualização |
+
+Regras:
+
+- Um aluno não pode criar, editar ou encerrar o próprio vínculo.
+- O administrador pode vincular e desvincular qualquer aluno de qualquer professor autorizado.
+- O professor pode vincular alunos ao próprio perfil, mas não pode alterar os vínculos de outros professores.
+- Um aluno deve ter no máximo um vínculo ativo, salvo se uma futura regra de negócio autorizar explicitamente o contrário.
+- Um professor pode ter vários alunos.
+- A criação de vínculos concorrentes deve ser controlada no backend por transação ou mecanismo atômico equivalente.
+- Impedir vínculos ativos duplicados.
+- Encerrar o vínculo anterior antes de efetivar uma eventual transferência.
+- Preservar o histórico acadêmico e os registros anteriores.
+- Após o encerramento, revogar imediatamente o acesso aos conteúdos e dados protegidos pelo vínculo.
+- Um professor pode consultar todos os alunos da plataforma, incluindo os não vinculados, mas somente os dados necessários para administrar vínculos e identificar alunos disponíveis.
+- O professor não pode alterar os dados privados, as notas ou os vínculos de alunos associados a outro professor, salvo permissões explicitamente autorizadas.
+- O aluno visualiza somente o professor ao qual está vinculado. Não deve existir catálogo de professores disponíveis para o aluno.
+
+A verificação do vínculo deve ser feita no backend em cada operação protegida. Não basta consultar um campo de vínculo armazenado no navegador.
+
+#### E. `courses` — cursos
+
+Documento: `courses/{courseId}`
+
+| Campo | Tipo | Descrição |
+|---|---|---|
+| `title` | string | Nome do curso |
+| `description` | string | Descrição |
+| `teacherId` | string | Professor responsável |
+| `status` | string | `draft`, `published` ou `archived` |
+| `visibility` | string | Regra de acesso |
+| `coverAssetId` | string ou null | Capa |
+| `createdAt` | timestamp | Criação |
+| `updatedAt` | timestamp | Atualização |
+
+Permitir que o professor organize cursos conforme o público autorizado, sem tornar o conteúdo automaticamente público para toda a plataforma.
+
+#### F. `modules` — módulos dos cursos
+
+Documento: `modules/{moduleId}`
+
+Campos: `courseId`, `title`, `description`, `order`, `status`, `createdAt`, `updatedAt`.
+
+Um curso pode ter vários módulos. A ordem deve ser controlada por um campo numérico ou mecanismo equivalente.
+
+#### G. `lessons` — aulas
+
+Documento: `lessons/{lessonId}`
+
+Campos: `courseId`, `moduleId`, `teacherId`, `title`, `description`, `contentType`, `order`, `status`, `visibility`, `estimatedDuration`, `createdAt`, `updatedAt`.
+
+As aulas podem conter texto, materiais, vídeos, áudios, links e outros recursos autorizados.
+
+#### H. `learningAssets` — materiais didáticos
+
+Documento: `learningAssets/{assetId}`
+
+| Campo | Tipo | Descrição |
+|---|---|---|
+| `title` | string | Nome do material |
+| `description` | string | Descrição |
+| `teacherId` | string | Autor |
+| `courseId` | string ou null | Curso relacionado |
+| `lessonId` | string ou null | Aula relacionada |
+| `assetType` | string | Tipo do recurso |
+| `storagePath` | string ou null | Caminho privado no Storage |
+| `externalUrl` | string ou null | URL externa validada |
+| `mimeType` | string | Tipo real validado |
+| `sizeBytes` | number | Tamanho |
+| `visibility` | string | Público autorizado |
+| `status` | string | `draft`, `published` ou `archived` |
+| `createdAt` | timestamp | Criação |
+| `updatedAt` | timestamp | Atualização |
+
+Suportar PDF, Word, Excel, PowerPoint, imagens, áudios, vídeos e links externos.
+
+Os links devem ser validados e apresentados com segurança. Arquivos privados não podem receber URLs públicas permanentes.
+
+#### I. `assessments` — avaliações
+
+Documento: `assessments/{assessmentId}`
+
+Campos: `teacherId`, `courseId`, `lessonId`, `title`, `description`, `assessmentType`, `maxScore`, `status`, `dueAt`, `createdAt`, `updatedAt`.
+
+#### J. `assessmentResults` — notas e feedbacks
+
+Documento: `assessmentResults/{resultId}`
+
+Campos: `assessmentId`, `studentId`, `teacherId`, `score`, `feedback`, `status`, `gradedBy`, `gradedAt`, `createdAt`, `updatedAt`.
+
+O aluno pode consultar somente os próprios resultados. O professor pode consultar e editar os resultados dos alunos sob sua responsabilidade e com autorização acadêmica válida. Acesso administrativo deve ser restrito, autorizado e auditável.
+
+Preservar o histórico de alterações de notas e feedbacks quando isso for relevante para a integridade acadêmica.
+
+#### K. `availabilitySlots` — disponibilidade do professor
+
+Documento: `availabilitySlots/{slotId}`
+
+Campos: `teacherId`, `startAt`, `endAt`, `timezone`, `status`, `recurrenceGroupId`, `createdAt`, `updatedAt`.
+
+Permitir horários individuais e recorrentes, com exceções, bloqueios e cancelamentos. Não confundir disponibilidade com reserva confirmada.
+
+#### L. `bookings` — reservas de aulas
+
+Documento: `bookings/{bookingId}`
+
+| Campo | Tipo | Descrição |
+|---|---|---|
+| `studentId` | string | Aluno |
+| `teacherId` | string | Professor |
+| `relationshipId` | string | Vínculo acadêmico válido |
+| `startAt` | timestamp | Início |
+| `endAt` | timestamp | Término |
+| `timezone` | string | Fuso da reserva |
+| `status` | string | `pending`, `confirmed`, `cancelled`, `completed` ou `failed` |
+| `zoomMeetingId` | string ou null | Identificador da reunião |
+| `calendarSyncStatus` | string | Estado da sincronização |
+| `idempotencyKey` | string | Chave para evitar duplicação |
+| `createdAt` | timestamp | Criação |
+| `updatedAt` | timestamp | Atualização |
+
+Impedir reservas simultâneas conflitantes. A validação deve ocorrer no backend usando transação ou estratégia atômica compatível com a modelagem escolhida.
+
+Não depender apenas de uma consulta prévia à disponibilidade, pois duas solicitações concorrentes poderiam reservar o mesmo horário.
+
+#### M. `integrationConnections` — conexões externas
+
+Documento: `integrationConnections/{connectionId}`
+
+Campos: `userId`, `provider`, `status`, `scopes`, `externalAccountId`, `connectedAt`, `updatedAt`, `disconnectedAt`.
+
+Utilize um documento por conexão, com identificação clara do usuário e do provedor.
+
+Tokens OAuth e refresh tokens devem permanecer protegidos no backend, preferencialmente em armazenamento seguro apropriado para credenciais. Não os exponha em documentos acessíveis ao frontend, logs ou respostas HTTP.
+
+#### N. `calendarEvents` — eventos sincronizados
+
+Documento: `calendarEvents/{eventId}`
+
+Campos: `bookingId`, `userId`, `provider`, `externalEventId`, `syncStatus`, `lastSyncedAt`, `lastError`, `createdAt`, `updatedAt`.
+
+Permitir a sincronização dos eventos pertinentes ao professor e, se o aluno optar por conectar seu Google Calendar, à agenda do aluno também.
+
+#### O. `mediaAssets` — vídeos e arquivos grandes
+
+Documento: `mediaAssets/{mediaId}`
+
+Campos: `ownerId`, `teacherId`, `title`, `storagePath`, `mimeType`, `sizeBytes`, `status`, `visibility`, `expiresAt`, `quotaReservationId`, `createdAt`, `updatedAt`, `deletedAt`.
+
+O conteúdo binário permanece no Cloud Storage. O Firestore armazena metadados, relacionamentos e estados.
+
+#### P. `storageQuotas` — controle de armazenamento
+
+Documento: `storageQuotas/{quotaId}`
+
+Campos: `scopeType`, `scopeId`, `limitBytes`, `usedBytes`, `reservedBytes`, `updatedAt`.
+
+Suportar cotas globais e por professor, com reservas atômicas, prevenção de concorrência, liberação correta após exclusões e reconciliação periódica com os arquivos reais.
+
+#### Q. `notifications` — notificações
+
+Documento: `notifications/{notificationId}`
+
+Campos: `userId`, `type`, `title`, `message`, `relatedEntityId`, `readAt`, `createdAt`.
+
+Notificações podem ser relacionadas a reservas, cancelamentos, novas aulas, materiais publicados, avaliações e alterações pertinentes.
+
+#### R. `auditLogs` — auditoria
+
+Documento: `auditLogs/{logId}`
+
+Campos: `actorId`, `action`, `entityType`, `entityId`, `targetUserId`, `metadata`, `createdAt`.
+
+Registrar operações sensíveis: alterações de papel, criação e encerramento de vínculos, alterações de permissões, notas, exclusões de mídia e operações administrativas.
+
+Os registros devem ser criados pelo backend, não pelo cliente. Restringir leitura e impedir alterações ou exclusões não autorizadas. Não registrar senhas, tokens ou conteúdo excessivo de dados pessoais.
+
+### 3.3 Relacionamentos entre coleções
+
+- `users` → `teacherProfiles` ou `studentProfiles`, conforme o papel.
+- `teacherProfiles` → `teacherStudentRelationships`.
+- `studentProfiles` → `teacherStudentRelationships`.
+- `courses` → `modules` → `lessons`.
+- `lessons` → `learningAssets`.
+- `assessments` → `assessmentResults`.
+- `teacherProfiles` → `availabilitySlots` → `bookings`.
+- `bookings` → `calendarEvents`.
+- `bookings` → reunião Zoom associada.
+- `mediaAssets` → arquivo correspondente no Cloud Storage.
+- `users` → `integrationConnections`.
+- `users` → `notifications` e registros de auditoria pertinentes.
+
+Preserve os IDs e relacionamentos históricos quando um usuário for desativado ou um vínculo for encerrado. Defina políticas de retenção e exclusão em vez de apagar dados acadêmicos em cascata indiscriminadamente.
+
+### 3.4 Índices e desempenho
+
+Crie os índices necessários para consultas como:
+
+- Alunos ativos e alunos disponíveis para vínculo.
+- Alunos vinculados a um professor específico.
+- Vínculos ativos por `studentId` e `teacherId`.
+- Cursos e aulas publicados para o usuário autorizado.
+- Resultados de avaliações por aluno e curso.
+- Disponibilidade de um professor em um intervalo de datas.
+- Reservas por professor, aluno, período e status.
+- Vídeos por proprietário, status e data de expiração.
+- Notificações não lidas por usuário.
+- Eventos pendentes de sincronização.
+
+Os índices devem ser versionados no repositório e incluídos na configuração de deploy.
+
+Não assuma que o Firestore oferece restrições relacionais equivalentes a chaves estrangeiras ou índices `UNIQUE` de bancos SQL. Implemente integridade referencial e exclusividade por meio de operações atômicas, transações e documentos auxiliares apropriados.
+
+---
+
+## 4. Regras de acesso e segurança
+
+Implemente segurança em múltiplas camadas.
+
+### 4.1 Matriz de permissões
+
+| Funcionalidade | Administrador | Professor | Aluno |
+|---|---|---|---|
+| Consultar todos os usuários | Sim | Dados necessários para suas funções | Não |
+| Criar papel de professor | Sim | Não | Não |
+| Alterar papel de administrador | Somente operação administrativa autorizada e protegida | Não | Não |
+| Vincular aluno a professor | Qualquer professor | Somente ao próprio perfil | Não |
+| Desvincular aluno | Qualquer vínculo | Somente vínculos próprios, conforme política | Não |
+| Consultar alunos não vinculados | Sim | Sim, dados limitados ao necessário | Não |
+| Ver lista de professores disponíveis | Sim | Conforme permissões administrativas | Não |
+| Visualizar o próprio professor | Sim | Perfil próprio | Somente professor vinculado |
+| Gerenciar conteúdos próprios | Conforme permissões administrativas | Sim | Não |
+| Consultar notas | Conforme autorização e auditoria | Alunos sob sua responsabilidade | Somente as próprias |
+| Configurar disponibilidade | Conforme permissões administrativas | Própria | Não |
+| Reservar aulas | Conforme operação administrativa autorizada | Conforme política definida | Sim, com professor vinculado |
+| Gerenciar conexões pessoais | Conforme suporte administrativo autorizado | Próprias | Próprias |
+| Consultar logs de auditoria | Sim, com acesso restrito | Não, salvo autorização específica | Não |
+
+A matriz deve ser complementada com políticas específicas para cada entidade. A permissão de consultar um aluno para realizar um vínculo não significa permissão para consultar todas as suas notas, documentos ou informações privadas.
+
+### 4.2 Firebase Security Rules
+
+Criar e testar:
+
+- `firestore.rules`
+- `storage.rules`
+
+As regras devem restringir leitura e escrita conforme a identidade, o papel, o vínculo acadêmico e a propriedade dos recursos.
+
+Requisitos:
+
+1. Cadastro público não pode atribuir privilégios.
+2. Usuários não podem editar seus próprios papéis, status privilegiados ou claims.
+3. Alunos não podem ler documentos privados de outros alunos.
+4. Alunos não podem descobrir professores disponíveis por consultas indiretas.
+5. Professor não pode administrar dados protegidos de alunos vinculados a outro professor.
+6. Arquivos e vídeos privados só podem ser acessados por usuários autorizados.
+7. Arquivos não podem ser tornados públicos por alteração de metadados feita pelo cliente.
+8. O acesso deve ser revogado quando o vínculo for encerrado.
+9. Operações administrativas devem ter autorização explícita.
+10. O acesso negado deve ocorrer no backend, mesmo quando alguém chama a API diretamente.
+
+**Atenção:** o Firebase Admin SDK ignora as Security Rules. Portanto, toda operação realizada no backend com o Admin SDK deve verificar explicitamente autenticação, papel, propriedade, vínculo e permissão.
+
+Implemente testes contra escalada de privilégio, IDs manipulados, acesso cruzado entre alunos e professores, leitura indevida de Storage e criação de vínculos concorrentes.
+
+---
+
+## 5. Backend e casos de uso
+
+Centralize as regras críticas em serviços de aplicação e operações de backend.
+
+Implemente casos de uso separados, por exemplo:
+
+- `RegisterStudent`
+- `CreateTeacher`
+- `ChangeUserRole`
+- `AssignStudentToTeacher`
+- `UnassignStudent`
+- `PublishLearningAsset`
+- `CreateCourse`
+- `CreateAssessment`
+- `GradeAssessment`
+- `CreateAvailability`
+- `BookLesson`
+- `CancelBooking`
+- `ConnectGoogleCalendar`
+- `ConnectZoom`
+- `CreateZoomMeeting`
+- `SyncCalendarEvent`
+- `UploadMedia`
+- `DeleteMedia`
+- `ExpireMedia`
+- `ReconcileStorageQuota`
+
+Os nomes podem ser adaptados, mas as responsabilidades precisam permanecer claras.
+
+Cada operação deve ter validação de entrada, autenticação, autorização, regra de negócio, persistência, tratamento de erros e logs seguros.
+
+Utilize Zod para validar entradas de formulários, parâmetros e payloads de APIs. A validação no frontend melhora a experiência, mas não substitui a validação no backend.
+
+Padronize as respostas HTTP e os erros para que a interface consiga apresentar mensagens úteis sem expor detalhes internos.
+
+---
+
+## 6. Design System e identidade visual
+
+Desenvolva um Design System real, reutilizável e consistente, em vez de estilizar cada página de maneira independente.
+
+O visual deve transmitir organização, confiança, modernidade e facilidade de uso. A plataforma é educacional, portanto deve evitar excesso de elementos, cores concorrentes, sombras exageradas e interfaces visualmente poluídas.
+
+### 6.1 Diretrizes visuais
+
+- Interface moderna, limpa e responsiva.
+- Layout consistente entre as áreas administrativa, docente e discente.
+- Hierarquia visual clara.
+- Navegação simples e previsível.
+- Espaçamento consistente.
+- Tipografia legível.
+- Contraste acessível.
+- Estados de carregamento, erro, sucesso e ausência de dados.
+- Componentes compartilhados entre as áreas.
+- Formulários com validação e mensagens de erro claras.
+- Confirmação para ações destrutivas.
+- Feedback visual para salvamentos e operações assíncronas.
+
+Utilize uma paleta de cores principal sóbria, com uma cor de destaque para ações primárias. Centralize as cores em tokens e não espalhe valores hexadecimais por todos os componentes.
+
+### 6.2 Tokens de design
+
+Criar tokens centralizados para:
+
+- Cores de fundo, superfícies, textos, bordas e ações.
+- Cores semânticas de sucesso, aviso, erro e informação.
+- Tipografia, pesos e tamanhos.
+- Escala de espaçamento.
+- Raios de borda.
+- Sombras.
+- Larguras de conteúdo.
+- Breakpoints responsivos.
+- Estados de foco, hover, desabilitado e carregamento.
+
+Use CSS variables e integre os tokens ao Tailwind CSS.
+
+A paleta exata pode ser definida durante a implementação, mas precisa ser consistente e documentada. Não repetir estilos de forma manual em páginas diferentes.
+
+### 6.3 Biblioteca de componentes
+
+Criar componentes reutilizáveis, no mínimo:
+
+- `Button`
+- `Input`
+- `Textarea`
+- `Select`
+- `Checkbox`
+- `RadioGroup`
+- `FormField`
+- `Modal` ou `Dialog`
+- `ConfirmDialog`
+- `DropdownMenu`
+- `Tabs`
+- `Badge`
+- `Avatar`
+- `Tooltip`
+- `Toast` ou sistema de notificações
+- `Table` com paginação
+- `SearchInput`
+- `FilterBar`
+- `DatePicker`
+- `Calendar`
+- `Card`
+- `StatCard`
+- `PageHeader`
+- `Breadcrumbs`
+- `Sidebar`
+- `Topbar`
+- `EmptyState`
+- `LoadingState`
+- `ErrorState`
+- `FileUploader`
+- `MediaCard`
+- `VideoPlayer`
+- `LessonContentViewer`
+- `AssessmentResultCard`
+- `BookingStatusBadge`
+
+Utilize shadcn/ui e Radix UI como base quando adequado, mantendo os componentes e seus estilos padronizados.
+
+Evite duplicar componentes que já existem no Design System. Crie variantes explícitas em vez de inventar um estilo novo em cada página.
+
+### 6.4 Layout e responsividade
+
+Desenvolva layouts específicos por papel, compartilhando a base visual.
+
+**Administrador:**
+- Sidebar com navegação administrativa.
+- Dashboard com indicadores relevantes.
+- Tabelas de usuários, professores, alunos e vínculos.
+- Filtros, busca e paginação.
+- Formulários administrativos.
+- Confirmações para mudanças de papel e vínculos.
+
+**Professor:**
+- Dashboard com próximas aulas, alunos, conteúdos e avaliações.
+- Área de gestão de cursos, módulos, aulas e materiais.
+- Área de alunos vinculados e disponíveis para vínculo.
+- Gestão de disponibilidade, reservas e integrações.
+- Upload, organização, publicação e exclusão de arquivos e vídeos.
+
+**Aluno:**
+- Dashboard com próximas aulas e conteúdos autorizados.
+- Acesso às próprias aulas, materiais, cursos, notas e feedbacks.
+- Agenda e reservas do professor vinculado.
+- Preferências e conexão opcional com Google Calendar.
+- Não apresentar catálogo de professores nem opções para trocar ou selecionar o próprio professor.
+
+A interface deve funcionar em desktop, tablet e celular, com navegação adaptada para telas pequenas.
+
+### 6.5 Acessibilidade
+
+Adotar boas práticas WCAG 2.2 AA, buscando conformidade sempre que aplicável:
+
+- Navegação por teclado.
+- Foco visível.
+- Labels associados aos campos.
+- Mensagens de erro acessíveis.
+- Contraste adequado.
+- Estrutura semântica.
+- Suporte a leitores de tela.
+- Botões e áreas clicáveis adequados para dispositivos móveis.
+- Estados que não dependam exclusivamente de cores.
+
+---
+
+## 7. Gestão de conteúdo e importação de materiais
+
+O professor deve conseguir criar, editar, organizar, publicar, arquivar e excluir materiais conforme as permissões.
+
+Suportar:
+
+- Texto e conteúdo formatado.
+- Imagens.
+- PDFs.
+- Documentos Word.
+- Planilhas Excel.
+- Apresentações PowerPoint.
+- Áudios.
+- Vídeos.
+- Links externos, incluindo YouTube e Google Drive.
+- Materiais vinculados a cursos, módulos, aulas, grupos ou alunos específicos.
+
+Implementar estados de rascunho, publicado e arquivado.
+
+O professor deve escolher o público autorizado de cada conteúdo, evitando que todo material seja automaticamente visível para todos os alunos.
+
+Quando houver importação de arquivos, tentar extrair texto e metadados de formatos suportados. Caso não seja possível, permitir o armazenamento e a disponibilização do arquivo original sem fingir que houve extração.
+
+Validar extensão, MIME type real, tamanho e, quando apropriado, conteúdo do arquivo. Aplicar medidas contra arquivos maliciosos e tipos não permitidos.
+
+---
+
+## 8. Armazenamento de vídeos e controle de custos
+
+Os vídeos gravados ou editados pelo professor devem ser enviados ao Cloud Storage e reproduzidos dentro da plataforma.
+
+Não guardar arquivos binários no Firestore.
+
+Implementar:
+
+- Upload resumível quando suportado.
+- Barra de progresso e possibilidade de retomar falhas.
+- Limites configuráveis por arquivo, professor e plataforma.
+- Validação do tamanho antes do upload e confirmação no backend.
+- Validação do tipo real de arquivo.
+- Controle de concorrência no consumo de cotas.
+- Reserva e liberação atômica de espaço.
+- Registro de metadados no Firestore.
+- Exclusão do objeto real no Storage ao excluir o vídeo.
+- Tarefa agendada para expiração de vídeos, quando configurada.
+- Recuperação de falhas e reconciliação de metadados com os objetos reais.
+- Acesso privado por autorização autenticada ou URLs temporárias adequadas.
+
+Como valores iniciais de exemplo, considerar:
+
+- Até 500 MB por vídeo.
+- Até 2 GB por professor.
+- Até 10 GB de armazenamento gerenciado pela aplicação.
+
+Esses valores devem ser configuráveis e não representam cotas gratuitas garantidas pelos provedores. A aplicação precisa validar os limites operacionais e econômicos da infraestrutura contratada.
+
+Permitir que o professor escolha uma data de expiração ou intervalos predefinidos, como 30, 60 ou 90 dias. Se a expiração estiver habilitada, um processo de backend deverá excluir o arquivo real e atualizar o estado no banco. Exclusões devem ser idempotentes.
+
+Monitorar não apenas o armazenamento, mas também o tráfego de saída, a reprodução dos vídeos, as operações de backend e outros custos associados. Alertas de orçamento não garantem interrupção automática de gastos.
+
+---
+
+## 9. Agendamento e integrações
+
+### 9.1 Agendamento
+
+O professor configura disponibilidade, duração das aulas, intervalos, bloqueios, regras de cancelamento e antecedência mínima quando aplicável.
+
+O aluno pode consultar os horários permitidos e reservar ou cancelar conforme as regras vigentes.
+
+A reserva deve:
+
+1. Validar autenticação e autorização.
+2. Confirmar vínculo ativo.
+3. Validar disponibilidade e conflitos.
+4. Criar a reserva atomicamente.
+5. Registrar um identificador de idempotência.
+6. Criar a reunião Zoom quando configurada.
+7. Sincronizar eventos do Google Calendar quando configurado.
+8. Notificar os usuários envolvidos.
+9. Registrar o estado de cada integração.
+10. Tratar falhas parciais e permitir reconciliação.
+
+Não assumir que chamadas a serviços externos participam da transação do Firestore. Utilize uma máquina de estados ou processo de orquestração que permita recuperar operações interrompidas sem criar reservas ou reuniões duplicadas.
+
+### 9.2 Zoom
+
+Permitir que o professor conecte sua conta Zoom por OAuth.
+
+Quando uma reserva for confirmada, o backend poderá criar uma reunião na conta do professor e associá-la à reserva.
+
+Armazenar apenas os identificadores e metadados necessários. Não expor tokens nem segredos no navegador.
+
+Tratar expiração de credenciais, erros, cancelamentos, tentativas de repetição e desconexão da conta.
+
+A plataforma não precisa hospedar a videoconferência; a reunião será fornecida pelo Zoom.
+
+### 9.3 Google Calendar
+
+Permitir conexão opcional de Google Calendar tanto para professores quanto para alunos.
+
+Utilizar OAuth e escopos mínimos. Os tokens devem ser armazenados e utilizados no backend.
+
+Sincronizar eventos pertinentes a reservas confirmadas, alterações e cancelamentos.
+
+Implementar idempotência, tentativas de repetição, registro de falhas, desconexão e tratamento de eventos alterados diretamente no calendário externo. Definir uma política explícita para conflitos, evitando sobrescrever silenciosamente informações.
+
+A reserva no aplicativo será a fonte principal da verdade sobre a disponibilidade da plataforma. Mudanças externas devem seguir uma política de reconciliação documentada.
+
+### 9.4 Google Sign-In e Drive
+
+O login com Google pode ser oferecido pelo Firebase Authentication.
+
+A integração com Google Drive para importar materiais é opcional e deve solicitar somente as permissões necessárias para a operação escolhida. Não solicitar acesso amplo ao Drive sem justificativa.
+
+### 9.5 Extensões futuras
+
+Organizar a arquitetura para permitir integrações futuras com inteligência artificial, Gemini ou WhatsApp, sem tornar essas integrações dependências obrigatórias do fluxo principal do MVP.
+
+Não implementar funcionalidades fictícias. Qualquer integração deve ter autenticação, configuração, tratamento de erros, controle de custos e limites claramente definidos.
+
+---
+
+## 10. Formulários, estado e tratamento de erros
+
+- Utilizar React Hook Form com Zod.
+- Validar os dados no frontend e no backend.
+- Diferenciar erros de validação, autorização, conflito, indisponibilidade externa e falha interna.
+- Exibir mensagens amigáveis sem vazar stack traces ou dados sensíveis.
+- Implementar estados de carregamento, vazio, sucesso e erro em todas as áreas relevantes.
+- Evitar envios duplicados e múltiplos cliques em operações críticas.
+- Atualizar os dados da interface somente após confirmação confiável da operação.
+- Usar paginação para grandes listas e filtros no servidor quando necessário.
+- Evitar consultas excessivas e leituras desnecessárias do Firestore.
+- Não armazenar credenciais ou dados sensíveis em `localStorage` sem uma justificativa de segurança explícita.
+
+---
+
+## 11. Testes e critérios de aceite
+
+Criar testes unitários, testes de integração e testes end-to-end para os fluxos críticos.
+
+### Autenticação e papéis
+
+- Cadastro público cria apenas alunos.
+- Usuário não consegue promover a própria conta.
+- Administrador autorizado consegue criar ou promover professores.
+- Rotas e APIs rejeitam usuários não autorizados.
+
+### Vínculos
+
+- Administrador pode vincular e desvincular qualquer aluno.
+- Professor pode vincular alunos ao próprio perfil.
+- Professor não pode alterar vínculos de outro professor.
+- Aluno não pode criar, alterar ou encerrar vínculos.
+- Professor consegue identificar alunos disponíveis para vínculo.
+- Aluno não consegue listar professores disponíveis.
+- Não existem dois vínculos ativos para o mesmo aluno quando a regra permite apenas um.
+- O acesso é revogado após o encerramento do vínculo.
+
+### Conteúdo
+
+- Professor consegue criar, editar, publicar e arquivar conteúdo.
+- O público configurado é respeitado.
+- Alunos não conseguem acessar materiais privados de outros alunos.
+- Arquivos permitidos são armazenados e servidos corretamente.
+- Arquivos inválidos ou acima do limite são rejeitados.
+- O sistema não declara sucesso antes de concluir uma operação.
+
+### Vídeos
+
+- Upload respeita limites por arquivo, professor e plataforma.
+- Uploads concorrentes não ultrapassam cotas.
+- Vídeos autorizados podem ser reproduzidos dentro da aplicação.
+- Arquivos privados não ficam disponíveis por URLs públicas permanentes.
+- Exclusão remove o arquivo real e atualiza o banco.
+- Expiração automática, quando habilitada, remove o objeto e atualiza os metadados.
+- Falhas parciais podem ser recuperadas.
+
+### Agendamento e integrações
+
+- Não é possível reservar um horário já ocupado por conflito.
+- Solicitações concorrentes não geram reservas duplicadas.
+- Cancelamentos respeitam as regras configuradas.
+- Repetições de chamadas não criam reuniões ou eventos duplicados.
+- Falhas no Zoom ou Google Calendar não corrompem a reserva.
+- A sincronização pode ser recuperada após falhas.
+- Desconexões e credenciais expiradas são tratadas corretamente.
+
+### Segurança
+
+- Um aluno não acessa notas ou documentos de outro aluno.
+- Um professor não acessa conteúdo protegido de outro professor.
+- Manipular IDs no navegador não concede acesso.
+- Chamadas diretas às APIs obedecem às mesmas regras da interface.
+- Firestore Rules e Storage Rules são testadas no Firebase Emulator Suite.
+- O backend valida explicitamente permissões em operações administrativas.
+- Logs não contêm tokens, senhas ou segredos.
+
+### Interface
+
+- Layout funcional em desktop, tablet e celular.
+- Navegação por teclado e foco visível.
+- Formulários com validação e mensagens compreensíveis.
+- Tabelas com paginação e filtros funcionais.
+- Estados vazios, carregamento e erros presentes.
+- Componentes consistentes com o Design System.
+
+---
+
+## 12. Entregáveis técnicos obrigatórios
+
+Entregar o código-fonte completo e organizado, incluindo:
+
+1. Aplicação Next.js funcional.
+2. Módulos de frontend e backend.
+3. Modelagem e documentação das coleções Firestore.
+4. Firebase Security Rules.
+5. Storage Rules.
+6. Arquivo de índices Firestore.
+7. Firebase Cloud Functions necessárias.
+8. Integração real com Firebase Authentication.
+9. Fluxos funcionais de cadastro, login, usuários e vínculos.
+10. Gestão de cursos, módulos, aulas, materiais e avaliações.
+11. Agendamento e reservas.
+12. Upload, reprodução, exclusão e expiração de vídeos.
+13. Integrações com Zoom e Google Calendar, incluindo fluxos de configuração.
+14. Design System documentado.
+15. Testes automatizados.
+16. Configuração dos emuladores locais.
+17. Arquivo `.env.example` sem segredos reais.
+18. Documentação de instalação, execução local, testes e deploy.
+19. Documentação de variáveis de ambiente, credenciais e configuração OAuth.
+20. Instruções para monitoramento de custos, cotas e erros operacionais.
+
+Não colocar chaves privadas, tokens ou credenciais reais no repositório.
+
+Se uma integração depender de credenciais externas ainda não fornecidas, implementar seu fluxo e configuração de forma real, apresentar claramente o que precisa ser configurado e não afirmar que a integração está operacional antes de testá-la com credenciais válidas.
+
+---
+
+## 13. Instrução final para a IA de programação
+
+Antes de implementar, analise os requisitos, defina os módulos, documente o modelo de dados e estabeleça os limites de responsabilidade entre frontend, backend e infraestrutura.
+
+Em seguida, implemente o conjunto completo de funcionalidades solicitadas, preservando o escopo funcional do MVP.
+
+Priorize integridade dos dados, segurança, manutenibilidade, acessibilidade, desempenho e controle de custos. Não adicione complexidade sem necessidade, mas também não simplifique regras de negócio críticas.
+
+O resultado esperado é uma plataforma funcional, segura, responsiva, testável e preparada para evolução, com interface consistente, banco de dados bem modelado, arquitetura organizada e operações reais integradas.
+
+**Critério definitivo de conclusão:** o projeto não deve ser considerado concluído apenas porque as telas foram criadas. Os fluxos precisam funcionar de ponta a ponta, as regras de acesso precisam ser testadas e as integrações precisam estar implementadas ou ter suas dependências externas claramente identificadas e documentadas.

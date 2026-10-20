@@ -1,0 +1,6 @@
+{
+  "name": "Easy English - Plataforma de Estudos",
+  "description": "Plataforma de estudos moderna e minimalista para ensino de inglês, inspirada no design system de produtividade Lovable, com gestão de anotações, cursos, agenda e progresso.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

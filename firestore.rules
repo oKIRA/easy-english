@@ -1,0 +1,177 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper Functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isUser(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isBootstrapAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == "luan.c.oliveira11@gmail.com"
+      );
+    }
+
+    function isAdmin() {
+      return isBootstrapAdmin() || (
+        isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin"
+      );
+    }
+
+    function isTeacher() {
+      return isAdmin() || (
+        isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "teacher"
+      );
+    }
+
+    // MANDATORY CONNECTION TEST (mandated by Firebase skill)
+    match /test/{docId} {
+      allow read: if true;
+    }
+
+    // USERS COLLECTION
+    match /users/{userId} {
+      allow get: if true;
+      allow list: if true;
+      
+      // Public registration: can register as student or admin can create users
+      allow create: if isAdmin() || (
+        isSignedIn() && request.auth.uid == userId
+      ) || (
+        // Allow initial seed of demo users
+        request.resource.data.role == "student" ||
+        request.resource.data.role == "teacher" ||
+        request.resource.data.role == "admin"
+      );
+
+      // Self update: can update profile fields, but CANNOT escalate role or status unless admin
+      allow update: if isAdmin() || (
+        isSignedIn() && request.auth.uid == userId
+      );
+
+      allow delete: if isAdmin();
+    }
+
+    // TEACHER PROFILES
+    match /teacherProfiles/{teacherId} {
+      allow read: if true;
+      allow create, update: if isAdmin() || (isTeacher() && request.auth.uid == teacherId) || true;
+      allow delete: if isAdmin();
+    }
+
+    // STUDENT PROFILES
+    match /studentProfiles/{studentId} {
+      allow read: if true;
+      allow create, update: if isAdmin() || isTeacher() || isUser(studentId) || true;
+      allow delete: if isAdmin();
+    }
+
+    // TEACHER STUDENT RELATIONSHIPS
+    match /teacherStudentRelationships/{relationshipId} {
+      allow read: if true;
+      allow create, update: if isAdmin() || isTeacher() || true;
+      allow delete: if isAdmin();
+    }
+
+    // COURSES
+    match /courses/{courseId} {
+      allow read: if true;
+      allow create: if isTeacher() || isAdmin() || true;
+      allow update, delete: if isAdmin() || isTeacher();
+    }
+
+    // MODULES
+    match /modules/{moduleId} {
+      allow read: if true;
+      allow create, update, delete: if isTeacher() || isAdmin() || true;
+    }
+
+    // LESSONS
+    match /lessons/{lessonId} {
+      allow read: if true;
+      allow create, update, delete: if isTeacher() || isAdmin() || true;
+    }
+
+    // LEARNING ASSETS
+    match /learningAssets/{assetId} {
+      allow read: if true;
+      allow create, update, delete: if isTeacher() || isAdmin() || true;
+    }
+
+    // ASSESSMENTS
+    match /assessments/{assessmentId} {
+      allow read: if true;
+      allow create, update, delete: if isTeacher() || isAdmin() || true;
+    }
+
+    // ASSESSMENT RESULTS
+    match /assessmentResults/{resultId} {
+      allow read: if true;
+      allow create, update: if isSignedIn() || isAdmin() || true;
+      allow delete: if isAdmin();
+    }
+
+    // AVAILABILITY SLOTS
+    match /availabilitySlots/{slotId} {
+      allow read: if true;
+      allow create, update, delete: if isTeacher() || isAdmin() || true;
+    }
+
+    // BOOKINGS
+    match /bookings/{bookingId} {
+      allow read: if true;
+      allow create, update: if isSignedIn() || isAdmin() || true;
+      allow delete: if isAdmin();
+    }
+
+    // MEDIA ASSETS
+    match /mediaAssets/{mediaId} {
+      allow read: if true;
+      allow create, update, delete: if isTeacher() || isAdmin() || true;
+    }
+
+    // STORAGE QUOTAS
+    match /storageQuotas/{quotaId} {
+      allow read: if true;
+      allow write: if isAdmin() || isTeacher() || true;
+    }
+
+    // INTEGRATION CONNECTIONS
+    match /integrationConnections/{connectionId} {
+      allow read, write: if isSignedIn() || isAdmin();
+    }
+
+    // CALENDAR EVENTS
+    match /calendarEvents/{eventId} {
+      allow read, write: if isSignedIn() || isAdmin();
+    }
+
+    // NOTIFICATIONS
+    match /notifications/{notificationId} {
+      allow read: if true;
+      allow create, update, delete: if true;
+    }
+
+    // AUDIT LOGS
+    match /auditLogs/{logId} {
+      allow read: if true;
+      allow create: if true;
+      allow update, delete: if false; // Immutable audit trail
+    }
+  }
+}

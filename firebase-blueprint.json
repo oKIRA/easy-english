@@ -1,0 +1,350 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile in the platform",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "maxLength": 120 },
+        "photoURL": { "type": "string", "maxLength": 500 },
+        "role": { "type": "string", "enum": ["admin", "teacher", "student"] },
+        "status": { "type": "string", "enum": ["active", "inactive", "suspended", "pending"] },
+        "timezone": { "type": "string", "maxLength": 50 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["uid", "name", "email", "role", "status"]
+    },
+    "TeacherProfile": {
+      "title": "TeacherProfile",
+      "description": "Pedagogical and availability profile of a teacher",
+      "type": "object",
+      "properties": {
+        "teacherId": { "type": "string" },
+        "bio": { "type": "string", "maxLength": 2000 },
+        "specialties": { "type": "array" },
+        "languages": { "type": "array" },
+        "timezone": { "type": "string" },
+        "bookingSettings": { "type": "object" },
+        "isAcceptingStudents": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["teacherId", "isAcceptingStudents"]
+    },
+    "StudentProfile": {
+      "title": "StudentProfile",
+      "description": "Academic goals and level for a student",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string" },
+        "englishLevel": { "type": "string" },
+        "learningGoals": { "type": "array" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["studentId"]
+    },
+    "TeacherStudentRelationship": {
+      "title": "TeacherStudentRelationship",
+      "description": "Binding between a student and their assigned teacher",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "ended"] },
+        "assignedBy": { "type": "string" },
+        "assignedAt": { "type": "string" },
+        "endedAt": { "type": "string" },
+        "endedBy": { "type": "string" },
+        "endReason": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["studentId", "teacherId", "status", "assignedBy"]
+    },
+    "Course": {
+      "title": "Course",
+      "description": "Course organized by a teacher",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 150 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "teacherId": { "type": "string" },
+        "status": { "type": "string", "enum": ["draft", "published", "archived"] },
+        "visibility": { "type": "string", "enum": ["enrolled_only", "all_my_students", "public"] },
+        "coverAssetId": { "type": "string" },
+        "level": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["title", "teacherId", "status", "visibility"]
+    },
+    "Module": {
+      "title": "Module",
+      "description": "Module within a course",
+      "type": "object",
+      "properties": {
+        "courseId": { "type": "string" },
+        "title": { "type": "string", "maxLength": 150 },
+        "description": { "type": "string" },
+        "order": { "type": "number" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["courseId", "title", "order"]
+    },
+    "Lesson": {
+      "title": "Lesson",
+      "description": "Individual pedagogical lesson",
+      "type": "object",
+      "properties": {
+        "courseId": { "type": "string" },
+        "moduleId": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "title": { "type": "string", "maxLength": 150 },
+        "description": { "type": "string" },
+        "contentType": { "type": "string", "enum": ["video", "text", "interactive", "material"] },
+        "order": { "type": "number" },
+        "status": { "type": "string", "enum": ["draft", "published", "archived"] },
+        "visibility": { "type": "string" },
+        "estimatedDuration": { "type": "number" },
+        "contentText": { "type": "string" },
+        "videoUrl": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["courseId", "moduleId", "teacherId", "title", "order", "status"]
+    },
+    "LearningAsset": {
+      "title": "LearningAsset",
+      "description": "Educational material attached to course or lesson",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 150 },
+        "description": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "courseId": { "type": "string" },
+        "lessonId": { "type": "string" },
+        "assetType": { "type": "string", "enum": ["pdf", "doc", "sheet", "audio", "video", "link", "slides"] },
+        "storagePath": { "type": "string" },
+        "externalUrl": { "type": "string" },
+        "mimeType": { "type": "string" },
+        "sizeBytes": { "type": "number" },
+        "visibility": { "type": "string" },
+        "status": { "type": "string", "enum": ["draft", "published", "archived"] },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["title", "teacherId", "assetType", "status"]
+    },
+    "Assessment": {
+      "title": "Assessment",
+      "description": "Quiz or test evaluation created by teacher",
+      "type": "object",
+      "properties": {
+        "teacherId": { "type": "string" },
+        "courseId": { "type": "string" },
+        "lessonId": { "type": "string" },
+        "title": { "type": "string", "maxLength": 150 },
+        "description": { "type": "string" },
+        "assessmentType": { "type": "string", "enum": ["quiz", "essay", "speaking", "reading"] },
+        "maxScore": { "type": "number" },
+        "status": { "type": "string" },
+        "dueAt": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["teacherId", "title", "assessmentType", "maxScore", "status"]
+    },
+    "AssessmentResult": {
+      "title": "AssessmentResult",
+      "description": "Student submission score and teacher feedback",
+      "type": "object",
+      "properties": {
+        "assessmentId": { "type": "string" },
+        "studentId": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "score": { "type": "number" },
+        "feedback": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "submitted", "graded"] },
+        "gradedBy": { "type": "string" },
+        "gradedAt": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["assessmentId", "studentId", "teacherId", "status"]
+    },
+    "AvailabilitySlot": {
+      "title": "AvailabilitySlot",
+      "description": "Teacher available time slot for bookings",
+      "type": "object",
+      "properties": {
+        "teacherId": { "type": "string" },
+        "startAt": { "type": "string" },
+        "endAt": { "type": "string" },
+        "timezone": { "type": "string" },
+        "status": { "type": "string", "enum": ["available", "booked", "blocked"] },
+        "recurrenceGroupId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["teacherId", "startAt", "endAt", "status"]
+    },
+    "Booking": {
+      "title": "Booking",
+      "description": "Confirmed or scheduled 1-on-1 English lesson",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "relationshipId": { "type": "string" },
+        "startAt": { "type": "string" },
+        "endAt": { "type": "string" },
+        "timezone": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "confirmed", "cancelled", "completed", "failed"] },
+        "zoomMeetingId": { "type": "string" },
+        "calendarSyncStatus": { "type": "string" },
+        "idempotencyKey": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["studentId", "teacherId", "relationshipId", "startAt", "endAt", "status", "idempotencyKey"]
+    },
+    "MediaAsset": {
+      "title": "MediaAsset",
+      "description": "Video or audio media file with storage tracking",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "title": { "type": "string", "maxLength": 150 },
+        "storagePath": { "type": "string" },
+        "mimeType": { "type": "string" },
+        "sizeBytes": { "type": "number" },
+        "status": { "type": "string", "enum": ["active", "processing", "expired", "deleted"] },
+        "visibility": { "type": "string" },
+        "expiresAt": { "type": "string" },
+        "quotaReservationId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["ownerId", "teacherId", "title", "sizeBytes", "status"]
+    },
+    "StorageQuota": {
+      "title": "StorageQuota",
+      "description": "Storage capacity and utilization tracking",
+      "type": "object",
+      "properties": {
+        "scopeType": { "type": "string", "enum": ["global", "teacher"] },
+        "scopeId": { "type": "string" },
+        "limitBytes": { "type": "number" },
+        "usedBytes": { "type": "number" },
+        "reservedBytes": { "type": "number" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["scopeType", "scopeId", "limitBytes", "usedBytes"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "In-app notification for users",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "type": { "type": "string" },
+        "title": { "type": "string", "maxLength": 150 },
+        "message": { "type": "string", "maxLength": 500 },
+        "relatedEntityId": { "type": "string" },
+        "readAt": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["userId", "type", "title", "message"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Auditable administrative and operational actions",
+      "type": "object",
+      "properties": {
+        "actorId": { "type": "string" },
+        "action": { "type": "string" },
+        "entityType": { "type": "string" },
+        "entityId": { "type": "string" },
+        "targetUserId": { "type": "string" },
+        "metadata": { "type": "object" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["actorId", "action", "entityType", "entityId"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "User" },
+      "description": "User account documents"
+    },
+    "/teacherProfiles/{teacherId}": {
+      "schema": { "$ref": "TeacherProfile" },
+      "description": "Teacher public and booking configuration"
+    },
+    "/studentProfiles/{studentId}": {
+      "schema": { "$ref": "StudentProfile" },
+      "description": "Student academic level and goals"
+    },
+    "/teacherStudentRelationships/{relationshipId}": {
+      "schema": { "$ref": "TeacherStudentRelationship" },
+      "description": "Academic assignment between a student and teacher"
+    },
+    "/courses/{courseId}": {
+      "schema": { "$ref": "Course" },
+      "description": "English courses created by teachers"
+    },
+    "/modules/{moduleId}": {
+      "schema": { "$ref": "Module" },
+      "description": "Modules organizing lessons within a course"
+    },
+    "/lessons/{lessonId}": {
+      "schema": { "$ref": "Lesson" },
+      "description": "Lessons within courses"
+    },
+    "/learningAssets/{assetId}": {
+      "schema": { "$ref": "LearningAsset" },
+      "description": "Didactic files and attachments"
+    },
+    "/assessments/{assessmentId}": {
+      "schema": { "$ref": "Assessment" },
+      "description": "Evaluations, quizzes, and tasks"
+    },
+    "/assessmentResults/{resultId}": {
+      "schema": { "$ref": "AssessmentResult" },
+      "description": "Scores and teacher feedback on assessments"
+    },
+    "/availabilitySlots/{slotId}": {
+      "schema": { "$ref": "AvailabilitySlot" },
+      "description": "Slots of time offered by teachers"
+    },
+    "/bookings/{bookingId}": {
+      "schema": { "$ref": "Booking" },
+      "description": "Lesson bookings with Zoom and calendar linkage"
+    },
+    "/mediaAssets/{mediaId}": {
+      "schema": { "$ref": "MediaAsset" },
+      "description": "Recorded video classes and media files"
+    },
+    "/storageQuotas/{quotaId}": {
+      "schema": { "$ref": "StorageQuota" },
+      "description": "Storage quotas per teacher and system-wide"
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "Notification" },
+      "description": "User notification messages"
+    },
+    "/auditLogs/{logId}": {
+      "schema": { "$ref": "AuditLog" },
+      "description": "Immutable security and audit logs"
+    }
+  }
+}
