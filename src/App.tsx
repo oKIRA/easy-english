@@ -80,6 +80,18 @@ function MainAppShell() {
           return <AdminOverview onNavigate={setCurrentView} />;
         case 'users':
           return <UserManagement />;
+        case 'students':
+          return <TeacherStudentsView />;
+        case 'courses':
+          return <TeacherCoursesView />;
+        case 'media':
+          return <TeacherMediaView />;
+        case 'assessments':
+          return <TeacherAssessmentsView />;
+        case 'schedule':
+          return <TeacherScheduleView />;
+        case 'integrations':
+          return <TeacherIntegrationsView />;
         case 'relationships':
           return <RelationshipManagement />;
         case 'notes':

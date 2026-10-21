@@ -34,7 +34,7 @@ import { WordEditor } from '../../shared/design-system/WordEditor';
 
 export const TeacherCoursesView: React.FC = () => {
   const { currentUser } = useAuth();
-  const teacherId = currentUser?.uid || 'demo-teacher-01';
+  const teacherId = currentUser?.uid || '';
 
   const [courses, setCourses] = useState<Course[]>([]);
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
@@ -60,13 +60,14 @@ export const TeacherCoursesView: React.FC = () => {
   const [lessonTitle, setLessonTitle] = useState('');
   const [lessonContentType, setLessonContentType] = useState<'video' | 'text'>('video');
   const [lessonDuration, setLessonDuration] = useState(25);
-  const [lessonVideoUrl, setLessonVideoUrl] = useState('https://vjs.zencdn.net/v/oceans.mp4');
+  const [lessonVideoUrl, setLessonVideoUrl] = useState('');
   const [lessonText, setLessonText] = useState('');
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { success, error } = useToast();
 
   const loadCourses = async () => {
+    if (!teacherId) return;
     try {
       setLoading(true);
       const snap = await getDocs(
@@ -80,7 +81,8 @@ export const TeacherCoursesView: React.FC = () => {
         selectCourse(list[0]);
       }
     } catch (e) {
-      console.warn('Using default course data', e);
+      console.error('Failed to load teacher courses:', e);
+      error('Não foi possível carregar seus cursos', String(e));
     } finally {
       setLoading(false);
     }
@@ -117,6 +119,10 @@ export const TeacherCoursesView: React.FC = () => {
 
   const handleCreateCourse = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!teacherId) {
+      error('Não foi possível identificar o professor autenticado.');
+      return;
+    }
     try {
       setIsSubmitting(true);
       const newCourseId = `course-${Date.now()}`;
@@ -559,24 +565,6 @@ export const TeacherCoursesView: React.FC = () => {
                 helperText="Suporta links do YouTube, Vimeo e vídeos MP4/WebM diretos."
                 required
               />
-              <div className="flex items-center gap-2 pt-1">
-                <span className="text-[11px] text-slate-500">Exemplos rápidos:</span>
-                <button
-                  type="button"
-                  onClick={() => setLessonVideoUrl('https://vjs.zencdn.net/v/oceans.mp4')}
-                  className="text-[11px] text-blue-600 hover:underline"
-                >
-                  Vídeo MP4 Demo
-                </button>
-                <span className="text-slate-300">•</span>
-                <button
-                  type="button"
-                  onClick={() => setLessonVideoUrl('https://www.youtube.com/watch?v=juKd26qkNAw')}
-                  className="text-[11px] text-blue-600 hover:underline"
-                >
-                  Aula YouTube Demo
-                </button>
-              </div>
             </div>
           ) : (
             <div>

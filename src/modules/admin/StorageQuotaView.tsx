@@ -2,13 +2,10 @@ import React, { useState, useEffect } from 'react';
 import {
   HardDrive,
   RefreshCw,
-  AlertTriangle,
-  CheckCircle2,
   FileVideo,
   Clock,
-  ShieldAlert,
 } from 'lucide-react';
-import { collection, getDocs, doc, setDoc, query } from 'firebase/firestore';
+import { collection, getDocs, doc, setDoc, query, writeBatch } from 'firebase/firestore';
 import { db } from '../../infrastructure/firebase/firebase';
 import { StorageQuota, MediaAsset, User } from '../../shared/types';
 import { Button } from '../../shared/design-system/Button';
@@ -16,14 +13,17 @@ import { Card, CardHeader } from '../../shared/design-system/Card';
 import { Badge } from '../../shared/design-system/Badge';
 import { useToast } from '../../shared/design-system/Toast';
 
+const GLOBAL_LIMIT_BYTES = 10 * 1024 * 1024 * 1024;
+const TEACHER_LIMIT_BYTES = 2 * 1024 * 1024 * 1024;
+
 export const StorageQuotaView: React.FC = () => {
   const [globalQuota, setGlobalQuota] = useState<StorageQuota>({
     id: 'global',
     scopeType: 'global',
     scopeId: 'global',
-    limitBytes: 10 * 1024 * 1024 * 1024, // 10 GB
-    usedBytes: 1.84 * 1024 * 1024 * 1024,
-    reservedBytes: 0.25 * 1024 * 1024 * 1024,
+    limitBytes: GLOBAL_LIMIT_BYTES,
+    usedBytes: 0,
+    reservedBytes: 0,
     updatedAt: new Date().toISOString(),
   });
 
@@ -31,37 +31,38 @@ export const StorageQuotaView: React.FC = () => {
   const [teachers, setTeachers] = useState<User[]>([]);
   const [mediaList, setMediaList] = useState<MediaAsset[]>([]);
   const [isReconciling, setIsReconciling] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  const { success, info } = useToast();
+  const { success, error } = useToast();
 
   const loadQuotaData = async () => {
     try {
-      const qSnap = await getDocs(collection(db, 'storageQuotas'));
-      const tQuotas: StorageQuota[] = [];
-      qSnap.forEach((d) => {
-        const q = { id: d.id, ...d.data() } as StorageQuota;
-        if (q.scopeId === 'global') {
-          setGlobalQuota(q);
-        } else {
-          tQuotas.push(q);
-        }
+      const [quotaSnapshot, usersSnap, mediaSnap] = await Promise.all([
+        getDocs(collection(db, 'storageQuotas')),
+        getDocs(query(collection(db, 'users'))),
+        getDocs(collection(db, 'mediaAssets')),
+      ]);
+      const quotas = quotaSnapshot.docs.map((d) => ({ id: d.id, ...d.data() } as StorageQuota));
+      const global = quotas.find((quota) => quota.scopeId === 'global');
+      setGlobalQuota(global || {
+        id: 'global',
+        scopeType: 'global',
+        scopeId: 'global',
+        limitBytes: GLOBAL_LIMIT_BYTES,
+        usedBytes: 0,
+        reservedBytes: 0,
+        updatedAt: new Date().toISOString(),
       });
-      setTeacherQuotas(tQuotas);
-
-      const usersSnap = await getDocs(collection(db, 'users'));
-      const tList: User[] = [];
-      usersSnap.forEach((d) => {
-        const u = d.data() as User;
-        if (u.role === 'teacher') tList.push(u);
-      });
-      setTeachers(tList);
-
-      const mediaSnap = await getDocs(collection(db, 'mediaAssets'));
-      const mList: MediaAsset[] = [];
-      mediaSnap.forEach((d) => mList.push({ id: d.id, ...d.data() } as MediaAsset));
-      setMediaList(mList);
+      setTeacherQuotas(quotas.filter((quota) => quota.scopeId !== 'global'));
+      setTeachers(usersSnap.docs
+        .map((d) => ({ uid: d.id, ...d.data() } as User))
+        .filter((user) => user.role === 'teacher'));
+      setMediaList(mediaSnap.docs.map((d) => ({ id: d.id, ...d.data() } as MediaAsset)));
     } catch (e) {
-      console.warn('Using default quota data', e);
+      console.error('Failed to load storage quota data:', e);
+      error('Não foi possível carregar as cotas de armazenamento', String(e));
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -72,7 +73,6 @@ export const StorageQuotaView: React.FC = () => {
   const handleReconcile = async () => {
     try {
       setIsReconciling(true);
-      // Recalculate total storage used from actual active media assets
       const mediaSnap = await getDocs(collection(db, 'mediaAssets'));
       let totalUsed = 0;
       const teacherMap: Record<string, number> = {};
@@ -85,14 +85,42 @@ export const StorageQuotaView: React.FC = () => {
         }
       });
 
-      // Update global quota in Firestore
+      const existingGlobal = globalQuota;
       const updatedGlobal: StorageQuota = {
-        ...globalQuota,
-        usedBytes: totalUsed || 1.84 * 1024 * 1024 * 1024,
+        ...existingGlobal,
+        id: 'global',
+        scopeType: 'global',
+        scopeId: 'global',
+        limitBytes: existingGlobal.limitBytes || GLOBAL_LIMIT_BYTES,
+        usedBytes: totalUsed,
+        reservedBytes: existingGlobal.reservedBytes || 0,
         updatedAt: new Date().toISOString(),
       };
       await setDoc(doc(db, 'storageQuotas', 'global'), updatedGlobal);
       setGlobalQuota(updatedGlobal);
+
+      const updatedTeacherQuotas = teachers.map((teacher) => {
+        const existingQuota = teacherQuotas.find((quota) => quota.scopeId === teacher.uid);
+        const quota: StorageQuota = {
+          id: teacher.uid,
+          scopeType: 'teacher',
+          scopeId: teacher.uid,
+          limitBytes: existingQuota?.limitBytes || TEACHER_LIMIT_BYTES,
+          usedBytes: teacherMap[teacher.uid] || 0,
+          reservedBytes: existingQuota?.reservedBytes || 0,
+          updatedAt: new Date().toISOString(),
+        };
+        return quota;
+      });
+      for (let offset = 0; offset < updatedTeacherQuotas.length; offset += 450) {
+        const batch = writeBatch(db);
+        updatedTeacherQuotas.slice(offset, offset + 450).forEach((quota) => {
+          batch.set(doc(db, 'storageQuotas', quota.scopeId), quota);
+        });
+        await batch.commit();
+      }
+      setTeacherQuotas(updatedTeacherQuotas);
+      setMediaList(mediaSnap.docs.map((d) => ({ id: d.id, ...d.data() } as MediaAsset)));
 
       // Audit log
       await setDoc(doc(db, 'auditLogs', `log-${Date.now()}`), {
@@ -107,7 +135,8 @@ export const StorageQuotaView: React.FC = () => {
 
       success('Reconciliação Concluída', 'Cotas calculadas com base nos arquivos físicos ativos no Cloud Storage.');
     } catch (e) {
-      info('Reconciliação simulada finalizada com sucesso');
+      console.error('Failed to reconcile storage quotas:', e);
+      error('Falha ao reconciliar cotas de armazenamento', String(e));
     } finally {
       setIsReconciling(false);
     }
@@ -121,7 +150,12 @@ export const StorageQuotaView: React.FC = () => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  const globalUsedPercent = Math.min(100, Math.round((globalQuota.usedBytes / globalQuota.limitBytes) * 100));
+  const globalLimitBytes = globalQuota.limitBytes || GLOBAL_LIMIT_BYTES;
+  const globalUsedPercent = Math.min(100, Math.round((globalQuota.usedBytes / globalLimitBytes) * 100));
+  const usageByTeacher = mediaList.reduce<Record<string, number>>((usage, media) => {
+    if (media.status === 'active') usage[media.teacherId] = (usage[media.teacherId] || 0) + (media.sizeBytes || 0);
+    return usage;
+  }, {});
 
   return (
     <div className="space-y-6 text-left">
@@ -147,7 +181,7 @@ export const StorageQuotaView: React.FC = () => {
       {/* Global Progress Bar */}
       <Card>
         <CardHeader
-          title="Cota Global da Plataforma (10 GB Alocados)"
+          title="Cota Global da Plataforma (10 GB)"
           subtitle="Capacidade total configurada para a instituição no Cloud Storage"
           icon={<HardDrive className="w-5 h-5 text-blue-600" />}
           action={
@@ -166,13 +200,13 @@ export const StorageQuotaView: React.FC = () => {
                   ? 'bg-amber-500'
                   : 'bg-blue-600'
               }`}
-              style={{ width: `${Math.max(5, globalUsedPercent)}%` }}
+              style={{ width: `${globalUsedPercent}%` }}
             />
           </div>
           <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
             <span>Utilizado: {formatBytes(globalQuota.usedBytes)}</span>
             <span>Reservado: {formatBytes(globalQuota.reservedBytes)}</span>
-            <span>Limite Máximo: {formatBytes(globalQuota.limitBytes)}</span>
+            <span>Limite Máximo: {formatBytes(globalLimitBytes)}</span>
           </div>
         </div>
       </Card>
@@ -191,7 +225,7 @@ export const StorageQuotaView: React.FC = () => {
           <div className="flex items-center gap-2 font-bold text-slate-900 mb-1">
             <HardDrive className="w-4 h-4 text-emerald-600" /> Cota Individual por Professor
           </div>
-          <p className="text-xl font-bold text-slate-900 mt-2">2.00 GB</p>
+          <p className="text-xl font-bold text-slate-900 mt-2">{formatBytes(TEACHER_LIMIT_BYTES)}</p>
           <p className="text-slate-500 mt-1">Cada docente possui sua própria fatia isolada de capacidade.</p>
         </div>
 
@@ -208,7 +242,7 @@ export const StorageQuotaView: React.FC = () => {
       <Card>
         <CardHeader
           title="Consumo por Professor Docente"
-          subtitle="Acompanhamento individualizado do teto de 2 GB por docente"
+          subtitle="Consumo calculado com arquivos ativos; teto de 2 GB por docente"
         />
         <div className="overflow-hidden rounded-lg border border-slate-200">
           <table className="min-w-full divide-y divide-slate-200 text-xs text-left">
@@ -222,38 +256,41 @@ export const StorageQuotaView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-              <tr>
-                <td className="px-4 py-3 font-semibold text-slate-900">Prof. Michael Davies</td>
-                <td className="px-4 py-3">680.00 MB</td>
-                <td className="px-4 py-3 text-slate-500">2.00 GB</td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <div className="w-24 bg-slate-100 h-2 rounded-full overflow-hidden">
-                      <div className="bg-emerald-500 h-full w-[34%]" />
-                    </div>
-                    <span className="text-[11px] text-slate-500">34%</span>
-                  </div>
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <Badge variant="emerald">Regular</Badge>
-                </td>
-              </tr>
-              <tr>
-                <td className="px-4 py-3 font-semibold text-slate-900">Profa. Sarah Jenkins</td>
-                <td className="px-4 py-3">120.50 MB</td>
-                <td className="px-4 py-3 text-slate-500">2.00 GB</td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <div className="w-24 bg-slate-100 h-2 rounded-full overflow-hidden">
-                      <div className="bg-emerald-500 h-full w-[6%]" />
-                    </div>
-                    <span className="text-[11px] text-slate-500">6%</span>
-                  </div>
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <Badge variant="emerald">Regular</Badge>
-                </td>
-              </tr>
+              {teachers.length ? teachers.map((teacher) => {
+                const quota = teacherQuotas.find((item) => item.scopeId === teacher.uid);
+                const usedBytes = usageByTeacher[teacher.uid] ?? 0;
+                const limitBytes = quota?.limitBytes || TEACHER_LIMIT_BYTES;
+                const usedPercent = Math.min(100, Math.round((usedBytes / limitBytes) * 100));
+                return (
+                  <tr key={teacher.uid}>
+                    <td className="px-4 py-3 font-semibold text-slate-900">{teacher.name || teacher.email}</td>
+                    <td className="px-4 py-3">{formatBytes(usedBytes)}</td>
+                    <td className="px-4 py-3 text-slate-500">{formatBytes(limitBytes)}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-24 bg-slate-100 h-2 rounded-full overflow-hidden">
+                          <div
+                            className={usedPercent >= 80 ? 'bg-rose-500 h-full' : 'bg-emerald-500 h-full'}
+                            style={{ width: `${usedPercent}%` }}
+                          />
+                        </div>
+                        <span className="text-[11px] text-slate-500">{usedPercent}%</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <Badge variant={usedPercent >= 100 ? 'rose' : usedPercent >= 80 ? 'amber' : 'emerald'}>
+                        {usedPercent >= 100 ? 'Limite atingido' : usedPercent >= 80 ? 'Atenção' : 'Regular'}
+                      </Badge>
+                    </td>
+                  </tr>
+                );
+              }) : (
+                <tr>
+                  <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                    {loading ? 'Carregando professores...' : 'Nenhum professor cadastrado.'}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

@@ -12,7 +12,7 @@ import {
   FileText,
   FolderOpen
 } from 'lucide-react';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../../infrastructure/firebase/firebase';
 import { useAuth } from '../auth/AuthContext';
 import { Button } from '../../shared/design-system/Button';
@@ -30,115 +30,18 @@ export interface StudyNote {
   tags?: string[];
 }
 
-const DEFAULT_NOTES: StudyNote[] = [
-  {
-    id: 'note-01',
-    title: 'Conditional Sentences in Business Negotiations',
-    category: 'Gramática',
-    isPinned: true,
-    tags: ['Conditionals', 'B2', 'Business'],
-    content: `<h2>Second vs Third Conditional in Negotiations</h2>
-<p><strong>Second Conditional (Hypothetical future)</strong><br/>
-Estrutura: <em>If + Past Simple, ... would + verbo base</em></p>
-<ul>
-  <li>"If we offered a 10% volume discount, would you commit to 500 units?"</li>
-  <li>Use quando estiver apresentando propostas ou concessões de forma diplomática sem se comprometer imediatamente.</li>
-</ul>
-<p><strong>Third Conditional (Past regrets / alternatives)</strong><br/>
-Estrutura: <em>If + Past Perfect, ... would have + particípio</em></p>
-<ul>
-  <li>"If we had finalized the contract in May, delivery would have started by now."</li>
-  <li>Dica de tom executivo: Suavize sempre com a expressão "With hindsight, if we had..."</li>
-</ul>
-<h3>Próximos Passos de Prática:</h3>
-<ul>
-  <li>Gravar áudio de pronúncia da frase 1</li>
-  <li>Criar 3 frases para a reunião com o fornecedor</li>
-  <li>Revisar na próxima mentoria com o professor</li>
-</ul>`,
-    updatedAt: new Date(Date.now() - 3600000).toISOString(),
-  },
-  {
-    id: 'note-02',
-    title: 'Idiomatic Expressions for International Meetings',
-    category: 'Reuniões',
-    isPinned: true,
-    tags: ['Idioms', 'Executive', 'Meetings'],
-    content: `<h2>Expressões Essenciais para Reuniões de Negócios</h2>
-<ul>
-  <li><strong>To park an idea:</strong> "Let's park that topic for next week's session." (Deixar uma ideia para depois).</li>
-  <li><strong>To touch base:</strong> "I will touch base with the logistics team tomorrow morning." (Entrar em contato brevemente).</li>
-  <li><strong>In the loop:</strong> "Please keep our regional director in the loop." (Manter informado).</li>
-  <li><strong>Ballpark figure:</strong> "Can you give us a ballpark figure on the budget?" (Uma estimativa aproximada).</li>
-  <li><strong>Meet in the middle:</strong> "Let's compromise and meet halfway." (Chegar a um acordo mútuo).</li>
-</ul>
-<h3>Vocabulário Complementar:</h3>
-<ol>
-  <li><strong>Cross that bridge when we come to it:</strong> Lidar com a questão somente no momento necessário.</li>
-  <li><strong>On the same page:</strong> Alinhados, com o mesmo entendimento.</li>
-</ol>`,
-    updatedAt: new Date(Date.now() - 86400000).toISOString(),
-  },
-  {
-    id: 'note-03',
-    title: 'Connected Speech & Linking Sounds',
-    category: 'Pronúncia',
-    isPinned: false,
-    tags: ['Phonetics', 'Fluency'],
-    content: `<h2>Regras Práticas de Fala Conectada em Inglês</h2>
-<p><strong>1. Conexão de Consoante com Vogal:</strong></p>
-<ul>
-  <li>"Hold on" é pronunciado naturalmente como <em>"hol-don"</em></li>
-  <li>"Pick it up" soa fluido como <em>"pi-ki-tup"</em></li>
-</ul>
-<p><strong>2. Flapping do T no Inglês Americano:</strong></p>
-<ul>
-  <li>A palavra "water" soa como <em>"wah-der"</em></li>
-  <li>Treine o posicionamento da ponta da língua no palato superior (crista alveolar).</li>
-</ul>`,
-    updatedAt: new Date(Date.now() - 172800000).toISOString(),
-  },
-  {
-    id: 'note-04',
-    title: 'High-Impact Verbs for Presentations',
-    category: 'Vocabulário',
-    isPinned: false,
-    tags: ['Presentations', 'Vocabulary'],
-    content: `<h2>Verbos de Alto Impacto para Apresentações Executivas</h2>
-<p>Em vez de dizer "We made the process better", prefira:</p>
-<ul>
-  <li>"We <strong>streamlined</strong> operational workflows."</li>
-  <li>"We <strong>spearheaded</strong> the international expansion initiative."</li>
-  <li>"We <strong>maximized</strong> client retention by 34%."</li>
-</ul>
-<p><strong>Conectivos recomendados:</strong> Furthermore, As a consequence, In light of these metrics.</p>`,
-    updatedAt: new Date(Date.now() - 259200000).toISOString(),
-  },
-];
-
 export const StudyNotesView: React.FC = () => {
   const { currentUser } = useAuth();
-  const { success, info } = useToast();
+  const { success, info, error } = useToast();
 
+  const notesStorageKey = `easy_english_study_notes_${currentUser?.uid || 'anonymous'}`;
+  const notesResetStorageKey = `${notesStorageKey}_reset_at`;
   const [activeTab, setActiveTab] = useState<'notes' | 'materials'>('notes');
-  const [notes, setNotes] = useState<StudyNote[]>(() => {
-    const saved = localStorage.getItem('easy_english_study_notes');
-    if (saved) {
-      try {
-        const parsed: StudyNote[] = JSON.parse(saved);
-        // Automatically clean legacy markdown into clean HTML
-        return parsed.map((n) => ({
-          ...n,
-          content: formatToHtml(n.content),
-        }));
-      } catch {
-        return DEFAULT_NOTES;
-      }
-    }
-    return DEFAULT_NOTES;
-  });
+  const [notes, setNotes] = useState<StudyNote[]>([]);
+  const [notesLoadedFor, setNotesLoadedFor] = useState<string | null>(null);
+  const notesReady = notesLoadedFor === notesStorageKey;
 
-  const [selectedNoteId, setSelectedNoteId] = useState<string>(notes[0]?.id || 'note-01');
+  const [selectedNoteId, setSelectedNoteId] = useState<string>(notes[0]?.id || '');
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -153,10 +56,69 @@ export const StudyNotesView: React.FC = () => {
   // Materials from teacher
   const [materials, setMaterials] = useState<LearningAsset[]>([]);
 
-  // Auto-save changes to notes list and localStorage
   useEffect(() => {
-    localStorage.setItem('easy_english_study_notes', JSON.stringify(notes));
-  }, [notes]);
+    let isActive = true;
+
+    async function loadNotes() {
+      if (!currentUser) {
+        setNotes([]);
+        setNotesLoadedFor(notesStorageKey);
+        return;
+      }
+
+      try {
+        const userSnapshot = await getDoc(doc(db, 'users', currentUser.uid));
+        if (!isActive) return;
+
+        const resetAt = userSnapshot.data()?.profileResetAt;
+        const savedResetAt = localStorage.getItem(notesResetStorageKey);
+        const resetTime = typeof resetAt === 'string' ? Date.parse(resetAt) : Number.NaN;
+        const savedResetTime = savedResetAt ? Date.parse(savedResetAt) : 0;
+
+        if (Number.isFinite(resetTime) && (!Number.isFinite(savedResetTime) || resetTime > savedResetTime)) {
+          localStorage.removeItem(notesStorageKey);
+          localStorage.setItem(notesResetStorageKey, resetAt);
+          setNotes([]);
+          setSelectedNoteId('');
+        } else {
+          const saved = localStorage.getItem(notesStorageKey);
+          if (saved) {
+            try {
+              const parsed = JSON.parse(saved) as StudyNote[];
+              const accountNotes = parsed.map((note) => ({
+                ...note,
+                content: formatToHtml(note.content),
+              }));
+              setNotes(accountNotes);
+              setSelectedNoteId(accountNotes[0]?.id || '');
+            } catch (err) {
+              console.error('Could not load saved study notes:', err);
+              setNotes([]);
+              setSelectedNoteId('');
+            }
+          } else {
+            setNotes([]);
+            setSelectedNoteId('');
+          }
+        }
+        setNotesLoadedFor(notesStorageKey);
+      } catch (err) {
+        console.error('Could not check study note reset status:', err);
+        error('Não foi possível carregar suas anotações', String(err));
+      }
+    }
+
+    void loadNotes();
+    return () => {
+      isActive = false;
+    };
+  }, [currentUser?.uid, error, notesResetStorageKey, notesStorageKey]);
+
+  // Keep notes isolated per account on this device.
+  useEffect(() => {
+    if (!notesReady) return;
+    localStorage.setItem(notesStorageKey, JSON.stringify(notes));
+  }, [notes, notesReady, notesStorageKey]);
 
   // Sync editor when note selection changes
   useEffect(() => {
@@ -171,17 +133,37 @@ export const StudyNotesView: React.FC = () => {
   // Load teacher materials
   useEffect(() => {
     async function loadMaterials() {
+      if (!currentUser?.uid) {
+        setMaterials([]);
+        return;
+      }
       try {
-        const snap = await getDocs(collection(db, 'learningAssets'));
+        const relationshipSnapshot = await getDocs(query(
+          collection(db, 'teacherStudentRelationships'),
+          where('studentId', '==', currentUser.uid),
+          where('status', '==', 'active')
+        ));
+        const teacherId = relationshipSnapshot.docs[0]?.data().teacherId;
+        if (!teacherId) {
+          setMaterials([]);
+          return;
+        }
+
+        const snap = await getDocs(query(
+          collection(db, 'learningAssets'),
+          where('teacherId', '==', teacherId),
+          where('status', '==', 'published')
+        ));
         const list: LearningAsset[] = [];
         snap.forEach((d) => list.push({ id: d.id, ...d.data() } as LearningAsset));
         setMaterials(list);
       } catch (err) {
-        console.warn('Materials preview loaded fallback', err);
+        console.error('Could not load study materials:', err);
+        error('Não foi possível carregar os materiais de estudo', String(err));
       }
     }
-    loadMaterials();
-  }, []);
+    void loadMaterials();
+  }, [currentUser?.uid, error]);
 
   // Compute clean text words & read time
   const stats = useMemo(() => {
@@ -346,6 +328,7 @@ export const StudyNotesView: React.FC = () => {
               </div>
               <button
                 onClick={handleCreateNote}
+                disabled={!notesReady}
                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#2563EB] text-white text-xs font-semibold hover:bg-[#1E3A8A] transition-colors shadow-2xs shrink-0"
                 title="Criar Nova Anotação"
               >

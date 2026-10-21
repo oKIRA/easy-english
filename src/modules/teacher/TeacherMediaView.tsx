@@ -33,7 +33,7 @@ import { useToast } from '../../shared/design-system/Toast';
 
 export const TeacherMediaView: React.FC = () => {
   const { currentUser } = useAuth();
-  const teacherId = currentUser?.uid || 'demo-teacher-01';
+  const teacherId = currentUser?.uid || '';
 
   const [mediaList, setMediaList] = useState<MediaAsset[]>([]);
   const [quota, setQuota] = useState<StorageQuota>({
@@ -41,7 +41,7 @@ export const TeacherMediaView: React.FC = () => {
     scopeType: 'teacher',
     scopeId: teacherId,
     limitBytes: 2 * 1024 * 1024 * 1024, // 2 GB
-    usedBytes: 680 * 1024 * 1024,      // 680 MB
+    usedBytes: 0,
     reservedBytes: 0,
     updatedAt: new Date().toISOString(),
   });
@@ -51,11 +51,9 @@ export const TeacherMediaView: React.FC = () => {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [videoTitle, setVideoTitle] = useState('');
   const [videoDesc, setVideoDesc] = useState('');
-  const [simulatedSizeMb, setSimulatedSizeMb] = useState<number>(240);
+  const [simulatedSizeMb, setSimulatedSizeMb] = useState<number>(0);
   const [expirationDays, setExpirationDays] = useState<number>(60);
-  const [videoUrl, setVideoUrl] = useState(
-    'https://vjs.zencdn.net/v/oceans.mp4'
-  );
+  const [videoUrl, setVideoUrl] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Preview video modal
@@ -64,6 +62,7 @@ export const TeacherMediaView: React.FC = () => {
   const { success, error } = useToast();
 
   const loadMedia = async () => {
+    if (!teacherId) return;
     try {
       setLoading(true);
       const snap = await getDocs(
@@ -74,16 +73,17 @@ export const TeacherMediaView: React.FC = () => {
       snap.forEach((d) => {
         const m = { id: d.id, ...d.data() } as MediaAsset;
         list.push(m);
-        totalUsed += m.sizeBytes || 0;
+        if (m.status === 'active') totalUsed += m.sizeBytes || 0;
       });
 
       setMediaList(list);
       setQuota((prev) => ({
         ...prev,
-        usedBytes: totalUsed || 680 * 1024 * 1024,
+        usedBytes: totalUsed,
       }));
     } catch (e) {
-      console.warn('Using default media', e);
+      console.error('Failed to load teacher media:', e);
+      error('Não foi possível carregar seus vídeos', String(e));
     } finally {
       setLoading(false);
     }
@@ -95,9 +95,13 @@ export const TeacherMediaView: React.FC = () => {
 
   const handleUploadVideo = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!teacherId) {
+      error('Não foi possível identificar o professor autenticado.');
+      return;
+    }
 
     // 1. Validate max file size: 500 MB limit
-    if (simulatedSizeMb > 500) {
+    if (simulatedSizeMb <= 0 || simulatedSizeMb > 500) {
       error('Limite por arquivo excedido', 'O tamanho máximo por vídeo é de 500 MB para preservação de custos.');
       return;
     }
@@ -379,24 +383,6 @@ export const TeacherMediaView: React.FC = () => {
               helperText="Suporta links diretos .mp4/.webm e vídeos do YouTube."
               required
             />
-            <div className="flex items-center gap-2 mt-1.5">
-              <span className="text-[11px] text-slate-500">Exemplos:</span>
-              <button
-                type="button"
-                onClick={() => setVideoUrl('https://vjs.zencdn.net/v/oceans.mp4')}
-                className="text-[11px] text-blue-600 hover:underline"
-              >
-                Vídeo MP4 Demo
-              </button>
-              <span className="text-slate-300">•</span>
-              <button
-                type="button"
-                onClick={() => setVideoUrl('https://www.youtube.com/watch?v=juKd26qkNAw')}
-                className="text-[11px] text-blue-600 hover:underline"
-              >
-                Aula YouTube Demo
-              </button>
-            </div>
           </div>
 
           <div>
@@ -430,13 +416,12 @@ export const TeacherMediaView: React.FC = () => {
       >
         {previewMedia && (
           <div className="space-y-4">
-            <VideoPlayer
-              src={previewMedia.downloadUrl || 'https://vjs.zencdn.net/v/oceans.mp4'}
-              title={previewMedia.title}
-            />
+            {previewMedia.downloadUrl
+              ? <VideoPlayer src={previewMedia.downloadUrl} title={previewMedia.title} />
+              : <p className="text-sm text-slate-500">Este item não possui uma URL de reprodução cadastrada.</p>}
             <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-600">
               <p className="font-semibold text-slate-900 mb-1">Descrição do Professor:</p>
-              <p>{previewMedia.description || 'Sessão prática em alta resolução.'}</p>
+              <p>{previewMedia.description || 'Sem descrição.'}</p>
             </div>
           </div>
         )}

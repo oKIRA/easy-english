@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import {
   collection,
+  getDoc,
   getDocs,
   doc,
   setDoc,
@@ -32,10 +33,11 @@ import { useToast } from '../../shared/design-system/Toast';
 
 export const TeacherScheduleView: React.FC = () => {
   const { currentUser } = useAuth();
-  const teacherId = currentUser?.uid || 'demo-teacher-01';
+  const teacherId = currentUser?.uid || '';
 
   const [slots, setSlots] = useState<AvailabilitySlot[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
+  const [studentNames, setStudentNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
   // New slot modal
@@ -51,6 +53,7 @@ export const TeacherScheduleView: React.FC = () => {
   const { success, error } = useToast();
 
   const loadScheduleData = async () => {
+    if (!teacherId) return;
     try {
       setLoading(true);
       // 1. Slots
@@ -70,15 +73,32 @@ export const TeacherScheduleView: React.FC = () => {
       bSnap.forEach((d) => bList.push({ id: d.id, ...d.data() } as Booking));
       bList.sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime());
       setBookings(bList);
+      const relSnap = await getDocs(query(
+        collection(db, 'teacherStudentRelationships'),
+        where('teacherId', '==', teacherId),
+        where('status', '==', 'active')
+      ));
+      const activeStudentIds = new Set(relSnap.docs.map((relationship) => relationship.data().studentId));
+      const bookingStudentIds = [...new Set(bList.map((booking) => booking.studentId))]
+        .filter((studentId) => activeStudentIds.has(studentId));
+      const studentSnapshots = await Promise.all(
+        bookingStudentIds.map((studentId) => getDoc(doc(db, 'users', studentId)))
+      );
+      const names: Record<string, string> = {};
+      studentSnapshots.forEach((student) => {
+        if (student.exists()) names[student.id] = String(student.data().name || '');
+      });
+      setStudentNames(names);
     } catch (e) {
-      console.warn('Using default schedule data', e);
+      console.error('Failed to load teacher schedule:', e);
+      error('Falha ao carregar a agenda docente', String(e));
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadScheduleData();
+    void loadScheduleData();
   }, [teacherId]);
 
   const handleCreateSlot = async (e: React.FormEvent) => {
@@ -190,7 +210,9 @@ export const TeacherScheduleView: React.FC = () => {
                         {new Date(b.startAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} -{' '}
                         {new Date(b.endAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                       </p>
-                      <p className="text-xs text-slate-600 mt-1 font-medium">Aluno: Beatriz Santos (B1)</p>
+                      <p className="text-xs text-slate-600 mt-1 font-medium">
+                        Aluno: {studentNames[b.studentId] || 'Aluno'}
+                      </p>
                       {b.notes && <p className="text-[11px] text-slate-400 italic mt-0.5">{b.notes}</p>}
                     </div>
 

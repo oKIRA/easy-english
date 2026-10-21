@@ -18,33 +18,50 @@ import { useToast } from '../../shared/design-system/Toast';
 
 export const StudentIntegrationsView: React.FC = () => {
   const { currentUser } = useAuth();
-  const studentId = currentUser?.uid || 'demo-student-01';
 
-  const [calendarConnected, setCalendarConnected] = useState(true);
-  const [userEmail, setUserEmail] = useState(currentUser?.email || 'beatriz.santos@student.fluently.edu');
-  const [selectedTimezone, setSelectedTimezone] = useState('America/Sao_Paulo');
+  const [calendarConnected, setCalendarConnected] = useState(false);
+  const [userEmail, setUserEmail] = useState(currentUser?.email || '');
+  const [selectedTimezone, setSelectedTimezone] = useState(currentUser?.timezone || '');
 
-  const { success, info } = useToast();
+  const { success, info, error } = useToast();
+
+  useEffect(() => {
+    if (!currentUser) return;
+    setUserEmail(currentUser.email);
+    setSelectedTimezone(currentUser.timezone || '');
+    getDoc(doc(db, 'integrationConnections', `${currentUser.uid}-calendar`))
+      .then((snapshot) => {
+        setCalendarConnected(snapshot.exists() && snapshot.data().status === 'connected');
+      })
+      .catch((err: unknown) => {
+        error('Não foi possível carregar a conexão com a agenda', String(err));
+      });
+  }, [currentUser, error]);
 
   const handleToggleCalendar = async () => {
+    if (!currentUser) return;
     const nextState = !calendarConnected;
-    setCalendarConnected(nextState);
-    await setDoc(
-      doc(db, 'integrationConnections', `${studentId}-calendar`),
-      {
-        userId: studentId,
-        provider: 'google_calendar',
-        status: nextState ? 'connected' : 'disconnected',
-        scopes: ['https://www.googleapis.com/auth/calendar.events'],
-        externalAccountId: userEmail,
-        updatedAt: new Date().toISOString(),
-      },
-      { merge: true }
-    );
-    if (nextState) {
-      success('Google Agenda Conectada', 'Suas aulas agendadas serão adicionadas automaticamente ao seu calendário.');
-    } else {
-      info('Google Agenda Desconectada');
+    try {
+      await setDoc(
+        doc(db, 'integrationConnections', `${currentUser.uid}-calendar`),
+        {
+          userId: currentUser.uid,
+          provider: 'google_calendar',
+          status: nextState ? 'connected' : 'disconnected',
+          scopes: ['https://www.googleapis.com/auth/calendar.events'],
+          externalAccountId: userEmail,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+      setCalendarConnected(nextState);
+      if (nextState) {
+        success('Google Agenda conectada');
+      } else {
+        info('Google Agenda desconectada');
+      }
+    } catch (err) {
+      error('Não foi possível atualizar a conexão com a agenda', String(err));
     }
   };
 
@@ -85,9 +102,7 @@ export const StudentIntegrationsView: React.FC = () => {
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500">Lembretes automáticos:</span>
-                  <span className="text-emerald-700 font-semibold flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5" /> 30 min antes da aula
-                  </span>
+                  <span className="text-slate-600 font-semibold">Não configurados</span>
                 </div>
               </div>
 
@@ -98,7 +113,9 @@ export const StudentIntegrationsView: React.FC = () => {
           </div>
 
           <div className="pt-4 border-t border-slate-100 flex items-center justify-between mt-4">
-            <span className="text-[10px] text-slate-400 font-mono">Status: Ativo</span>
+            <span className="text-[10px] text-slate-400 font-mono">
+              Status: {calendarConnected ? 'Conectado' : 'Desconectado'}
+            </span>
             <Button
               size="sm"
               variant={calendarConnected ? 'ghost' : 'primary'}
@@ -130,6 +147,7 @@ export const StudentIntegrationsView: React.FC = () => {
                 }}
                 className="w-full rounded-lg border border-slate-300 bg-white p-2 text-xs font-mono"
               >
+                <option value="">Selecione um fuso horário</option>
                 <option value="America/Sao_Paulo">America/Sao_Paulo (Horário de Brasília, UTC-3)</option>
                 <option value="America/Manaus">America/Manaus (UTC-4)</option>
                 <option value="America/Noronha">America/Noronha (UTC-2)</option>

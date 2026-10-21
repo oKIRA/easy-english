@@ -72,7 +72,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'settings', label: 'Configurações', icon: <Settings className="w-4 h-4" /> },
   ];
 
-  const navItems = activeRole === 'admin' ? adminNav : activeRole === 'teacher' ? teacherNav : studentNav;
+  const adminItems = [
+    ...teacherNav,
+    ...adminNav.filter((item) => !teacherNav.some((teacherItem) => teacherItem.id === item.id)),
+  ];
+  const navItems = activeRole === 'admin' ? adminItems : activeRole === 'teacher' ? teacherNav : studentNav;
 
   const roleLabels = {
     admin: 'Administração',

@@ -32,7 +32,7 @@ import { useToast } from '../../shared/design-system/Toast';
 
 export const TeacherMaterialsView: React.FC = () => {
   const { currentUser } = useAuth();
-  const teacherId = currentUser?.uid || 'demo-teacher-01';
+  const teacherId = currentUser?.uid || '';
 
   const [materials, setMaterials] = useState<LearningAsset[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,6 +48,7 @@ export const TeacherMaterialsView: React.FC = () => {
   const { success, error } = useToast();
 
   const loadMaterials = async () => {
+    if (!teacherId) return;
     try {
       setLoading(true);
       const snap = await getDocs(
@@ -57,7 +58,8 @@ export const TeacherMaterialsView: React.FC = () => {
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as LearningAsset));
       setMaterials(list);
     } catch (e) {
-      console.warn('Using default materials', e);
+      console.error('Failed to load teacher materials:', e);
+      error('Não foi possível carregar seus materiais', String(e));
     } finally {
       setLoading(false);
     }
@@ -69,6 +71,10 @@ export const TeacherMaterialsView: React.FC = () => {
 
   const handleAddMaterial = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!teacherId) {
+      error('Não foi possível identificar o professor autenticado.');
+      return;
+    }
     try {
       setIsSubmitting(true);
       const assetId = `asset-${Date.now()}`;
@@ -78,9 +84,9 @@ export const TeacherMaterialsView: React.FC = () => {
         description,
         teacherId,
         assetType,
-        externalUrl: externalUrl || 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
+        externalUrl,
         mimeType: assetType === 'pdf' ? 'application/pdf' : 'application/octet-stream',
-        sizeBytes: 1024 * 512, // 512 KB
+        sizeBytes: 0,
         visibility: 'all_my_students',
         status: 'published',
         createdAt: new Date().toISOString(),

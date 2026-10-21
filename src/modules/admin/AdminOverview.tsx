@@ -16,18 +16,20 @@ import { Card, CardHeader } from '../../shared/design-system/Card';
 import { Button } from '../../shared/design-system/Button';
 import { Badge } from '../../shared/design-system/Badge';
 import { AuditLog } from '../../shared/types';
+import { useToast } from '../../shared/design-system/Toast';
 
 export const AdminOverview: React.FC<{ onNavigate: (viewId: string) => void }> = ({ onNavigate }) => {
   const [stats, setStats] = useState({
-    totalUsers: 6,
-    teachersCount: 2,
-    studentsCount: 3,
-    activeRelationships: 1,
-    storageUsedGb: 1.84,
-    totalBookings: 1,
+    totalUsers: 0,
+    teachersCount: 0,
+    studentsCount: 0,
+    activeRelationships: 0,
+    storageUsedGb: 0,
+    totalBookings: 0,
   });
   const [recentLogs, setRecentLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const { error } = useToast();
 
   useEffect(() => {
     async function loadStats() {
@@ -41,16 +43,24 @@ export const AdminOverview: React.FC<{ onNavigate: (viewId: string) => void }> =
           if (role === 'student') students++;
         });
 
-        const relsSnap = await getDocs(collection(db, 'teacherStudentRelationships'));
-        const bookingsSnap = await getDocs(collection(db, 'bookings'));
+        const [relsSnap, bookingsSnap, mediaSnap] = await Promise.all([
+          getDocs(collection(db, 'teacherStudentRelationships')),
+          getDocs(collection(db, 'bookings')),
+          getDocs(collection(db, 'mediaAssets')),
+        ]);
+        const activeRelationships = relsSnap.docs.filter((d) => d.data().status === 'active').length;
+        const storageUsedBytes = mediaSnap.docs.reduce((total, d) => {
+          const data = d.data();
+          return total + (data.status === 'active' ? Number(data.sizeBytes) || 0 : 0);
+        }, 0);
 
         setStats({
-          totalUsers: usersSnap.size || 6,
-          teachersCount: teachers || 2,
-          studentsCount: students || 3,
-          activeRelationships: relsSnap.size || 1,
-          storageUsedGb: 1.84,
-          totalBookings: bookingsSnap.size || 1,
+          totalUsers: usersSnap.size,
+          teachersCount: teachers,
+          studentsCount: students,
+          activeRelationships,
+          storageUsedGb: Number((storageUsedBytes / (1024 ** 3)).toFixed(2)),
+          totalBookings: bookingsSnap.size,
         });
 
         const logsSnap = await getDocs(query(collection(db, 'auditLogs'), limit(5)));
@@ -58,13 +68,14 @@ export const AdminOverview: React.FC<{ onNavigate: (viewId: string) => void }> =
         logsSnap.forEach((d) => logs.push({ id: d.id, ...d.data() } as AuditLog));
         setRecentLogs(logs);
       } catch (e) {
-        console.warn('Using default overview stats', e);
+        console.error('Failed to load admin overview:', e);
+        error('Não foi possível carregar os dados administrativos', String(e));
       } finally {
         setLoading(false);
       }
     }
     loadStats();
-  }, []);
+  }, [error]);
 
   return (
     <div className="space-y-6 text-left">
@@ -99,42 +110,42 @@ export const AdminOverview: React.FC<{ onNavigate: (viewId: string) => void }> =
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         <StatCard
           title="Total Usuários"
-          value={stats.totalUsers}
+          value={loading ? '—' : stats.totalUsers}
           icon={<Users className="w-5 h-5" />}
           color="blue"
           subtitle="Ativos na base"
         />
         <StatCard
           title="Docentes"
-          value={stats.teachersCount}
+          value={loading ? '—' : stats.teachersCount}
           icon={<GraduationCap className="w-5 h-5" />}
           color="emerald"
           subtitle="Professores ativos"
         />
         <StatCard
           title="Alunos"
-          value={stats.studentsCount}
+          value={loading ? '—' : stats.studentsCount}
           icon={<Users className="w-5 h-5" />}
           color="blue"
           subtitle="Matriculados"
         />
         <StatCard
           title="Vínculos Ativos"
-          value={stats.activeRelationships}
+          value={loading ? '—' : stats.activeRelationships}
           icon={<Link2 className="w-5 h-5" />}
           color="purple"
           subtitle="Pares mentor-aluno"
         />
         <StatCard
           title="Cota Storage"
-          value={`${stats.storageUsedGb} GB`}
+          value={loading ? '—' : `${stats.storageUsedGb} GB`}
           icon={<HardDrive className="w-5 h-5" />}
           color="amber"
-          subtitle="De 10 GB alocados (18%)"
+          subtitle="Uso calculado a partir das mídias cadastradas"
         />
         <StatCard
           title="Aulas Marcadas"
-          value={stats.totalBookings}
+          value={loading ? '—' : stats.totalBookings}
           icon={<CalendarCheck2 className="w-5 h-5" />}
           color="emerald"
           subtitle="Confirmadas"

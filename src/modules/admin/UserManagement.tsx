@@ -8,6 +8,7 @@ import {
   CheckCircle,
   XCircle,
   MoreVertical,
+  RotateCcw,
 } from 'lucide-react';
 import {
   collection,
@@ -26,6 +27,7 @@ import { Badge } from '../../shared/design-system/Badge';
 import { Input } from '../../shared/design-system/Input';
 import { Modal } from '../../shared/design-system/Modal';
 import { useToast } from '../../shared/design-system/Toast';
+import { resetUserProfileData } from '../../services/userProfileService';
 
 interface UserInvitation {
   name: string;
@@ -48,6 +50,8 @@ export const UserManagement: React.FC = () => {
   const [inviteRole, setInviteRole] = useState<'teacher' | 'student'>('teacher');
   const [specialties, setSpecialties] = useState('Business English, Conversação');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [userToReset, setUserToReset] = useState<User | null>(null);
+  const [isResetting, setIsResetting] = useState(false);
 
   const { success, error } = useToast();
   const { currentUser } = useAuth();
@@ -91,9 +95,9 @@ export const UserManagement: React.FC = () => {
           doc(db, 'teacherProfiles', userId),
           {
             teacherId: userId,
-            bio: 'Docente de língua inglesa certificado.',
-            specialties: ['General English', 'Grammar'],
-            languages: ['Inglês', 'Português'],
+            bio: '',
+            specialties: [],
+            languages: [],
             timezone: 'America/Sao_Paulo',
             bookingSettings: {
               slotDurationMinutes: 45,
@@ -200,6 +204,31 @@ export const UserManagement: React.FC = () => {
       success('Convite cancelado.');
     } catch (err) {
       error('Não foi possível cancelar o convite', String(err));
+    }
+  };
+
+  const handleResetUserProfile = async () => {
+    if (!userToReset) return;
+
+    try {
+      setIsResetting(true);
+      const deletedDocuments = await resetUserProfileData(userToReset.uid, userToReset.role);
+      await setDoc(doc(db, 'auditLogs', `log-${Date.now()}`), {
+        actorId: currentUser?.uid,
+        actorName: currentUser?.name || 'Administrador',
+        action: 'RESET_USER_PROFILE',
+        entityType: 'userProfile',
+        entityId: userToReset.uid,
+        targetUserId: userToReset.uid,
+        metadata: { deletedDocuments },
+        createdAt: new Date().toISOString(),
+      });
+      success('Perfil resetado', `${deletedDocuments} registro(s) associado(s) foram apagados. A conta foi mantida.`);
+      setUserToReset(null);
+    } catch (err) {
+      error('Não foi possível resetar o perfil', String(err));
+    } finally {
+      setIsResetting(false);
     }
   };
 
@@ -312,22 +341,33 @@ export const UserManagement: React.FC = () => {
                     </select>
                   </td>
                   <td className="px-4 py-3.5 text-right">
-                    {user.status === 'active' ? (
+                    <div className="flex items-center justify-end gap-3">
+                      {user.status === 'active' ? (
+                        <button
+                          onClick={() => handleStatusChange(user.uid, 'suspended')}
+                          className="text-slate-400 hover:text-rose-600 text-xs transition-colors"
+                          title="Suspender acesso"
+                        >
+                          Suspender
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleStatusChange(user.uid, 'active')}
+                          className="text-emerald-600 hover:text-emerald-700 font-semibold text-xs transition-colors"
+                        >
+                          Ativar
+                        </button>
+                      )}
                       <button
-                        onClick={() => handleStatusChange(user.uid, 'suspended')}
-                        className="text-slate-400 hover:text-rose-600 text-xs transition-colors"
-                        title="Suspender acesso"
+                        type="button"
+                        onClick={() => setUserToReset(user)}
+                        className="inline-flex items-center gap-1 text-rose-500 hover:text-rose-700 text-xs transition-colors"
+                        title="Apagar os dados do perfil sem excluir a conta"
                       >
-                        Suspender
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        Resetar perfil
                       </button>
-                    ) : (
-                      <button
-                        onClick={() => handleStatusChange(user.uid, 'active')}
-                        className="text-emerald-600 hover:text-emerald-700 font-semibold text-xs transition-colors"
-                      >
-                        Ativar
-                      </button>
-                    )}
+                    </div>
                   </td>
                 </tr>
               ))
@@ -379,6 +419,32 @@ export const UserManagement: React.FC = () => {
           </p>
         )}
       </section>
+
+      <Modal
+        isOpen={Boolean(userToReset)}
+        onClose={() => !isResetting && setUserToReset(null)}
+        title="Resetar conteúdo do perfil?"
+        description="A conta e o histórico de auditoria serão preservados."
+      >
+        <p className="text-sm text-slate-600">
+          Esta ação apaga os dados acadêmicos, vínculos, avaliações, reservas, notificações e integrações de{' '}
+          <strong>{userToReset?.name}</strong>. Para professores, também remove cursos e materiais criados por esse perfil.
+          Anotações salvas no navegador serão limpas quando a pessoa abrir o caderno novamente. Esta operação não pode ser desfeita.
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" type="button" onClick={() => setUserToReset(null)} disabled={isResetting}>
+            Cancelar
+          </Button>
+          <Button
+            variant="destructive"
+            type="button"
+            onClick={handleResetUserProfile}
+            isLoading={isResetting}
+          >
+            Confirmar reset
+          </Button>
+        </div>
+      </Modal>
 
       {/* Modal: Create invitation */}
       <Modal

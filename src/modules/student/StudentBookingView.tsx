@@ -12,6 +12,7 @@ import {
 import {
   collection,
   getDocs,
+  getDoc,
   doc,
   setDoc,
   updateDoc,
@@ -30,18 +31,18 @@ import { useToast } from '../../shared/design-system/Toast';
 
 export const StudentBookingView: React.FC = () => {
   const { currentUser } = useAuth();
-  const studentId = currentUser?.uid || 'demo-student-01';
+  const studentId = currentUser?.uid || '';
 
-  const [teacherId, setTeacherId] = useState<string>('demo-teacher-01');
-  const [teacherName, setTeacherName] = useState<string>('Prof. Michael Davies');
-  const [relationshipId, setRelationshipId] = useState<string>('rel-01');
+  const [teacherId, setTeacherId] = useState('');
+  const [teacherName, setTeacherName] = useState('');
+  const [relationshipId, setRelationshipId] = useState('');
   const [availableSlots, setAvailableSlots] = useState<AvailabilitySlot[]>([]);
   const [myBookings, setMyBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Booking Modal
   const [selectedSlot, setSelectedSlot] = useState<AvailabilitySlot | null>(null);
-  const [bookingNotes, setBookingNotes] = useState('Prática de conversação para reuniões de negócios');
+  const [bookingNotes, setBookingNotes] = useState('');
   const [isBooking, setIsBooking] = useState(false);
 
   const { success, error } = useToast();
@@ -49,6 +50,7 @@ export const StudentBookingView: React.FC = () => {
   const loadData = async () => {
     try {
       setLoading(true);
+      if (!studentId) return;
 
       // 1. Get active relationship to identify assigned teacher
       const relSnap = await getDocs(
@@ -59,8 +61,8 @@ export const StudentBookingView: React.FC = () => {
         )
       );
 
-      let tId = 'demo-teacher-01';
-      let rId = 'rel-01';
+      let tId = '';
+      let rId = '';
 
       relSnap.forEach((d) => {
         tId = d.data().teacherId;
@@ -70,18 +72,24 @@ export const StudentBookingView: React.FC = () => {
       setTeacherId(tId);
       setRelationshipId(rId);
 
-      // 2. Load teacher's available slots
-      const slotsSnap = await getDocs(
-        query(
-          collection(db, 'availabilitySlots'),
-          where('teacherId', '==', tId),
-          where('status', '==', 'available')
-        )
-      );
-      const sList: AvailabilitySlot[] = [];
-      slotsSnap.forEach((d) => sList.push({ id: d.id, ...d.data() } as AvailabilitySlot));
-      sList.sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime());
-      setAvailableSlots(sList);
+      if (tId) {
+        const teacherSnapshot = await getDoc(doc(db, 'users', tId));
+        setTeacherName(teacherSnapshot.exists() ? teacherSnapshot.data().name || '' : '');
+        const slotsSnap = await getDocs(
+          query(
+            collection(db, 'availabilitySlots'),
+            where('teacherId', '==', tId),
+            where('status', '==', 'available')
+          )
+        );
+        const sList: AvailabilitySlot[] = [];
+        slotsSnap.forEach((d) => sList.push({ id: d.id, ...d.data() } as AvailabilitySlot));
+        sList.sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime());
+        setAvailableSlots(sList);
+      } else {
+        setTeacherName('');
+        setAvailableSlots([]);
+      }
 
       // 3. Load my bookings
       const bSnap = await getDocs(
@@ -103,7 +111,7 @@ export const StudentBookingView: React.FC = () => {
   }, [studentId]);
 
   const handleConfirmBooking = async () => {
-    if (!selectedSlot) return;
+    if (!selectedSlot || !teacherId || !relationshipId) return;
 
     try {
       setIsBooking(true);
@@ -201,7 +209,9 @@ export const StudentBookingView: React.FC = () => {
       <div>
         <h1 className="text-xl font-bold text-slate-900 tracking-tight">Agendamento de Aulas Individuais</h1>
         <p className="text-xs text-slate-500 mt-1">
-          Reserve suas sessões de conversação ao vivo com seu professor mentor ({teacherName}).
+          {teacherName
+            ? `Reserve sessões de conversação com ${teacherName}.`
+            : 'Você poderá agendar aulas depois que um professor for vinculado à sua conta.'}
         </p>
       </div>
 
@@ -210,7 +220,7 @@ export const StudentBookingView: React.FC = () => {
         <div className="lg:col-span-2 space-y-4">
           <Card>
             <CardHeader
-              title={`Horários Disponíveis de ${teacherName}`}
+              title={teacherName ? `Horários Disponíveis de ${teacherName}` : 'Horários disponíveis'}
               subtitle="Slots verificados em tempo real com prevenção de conflitos"
               icon={<Clock className="w-5 h-5 text-blue-600" />}
             />
@@ -258,8 +268,10 @@ export const StudentBookingView: React.FC = () => {
               ) : (
                 <div className="col-span-full py-12 text-center text-slate-400 text-xs">
                   {loading
-                    ? 'Consultando disponibilidade do mentor...'
-                    : 'Nenhum horário em aberto no momento. Fale com seu professor para liberar novos slots.'}
+                    ? 'Consultando disponibilidade...'
+                    : teacherName
+                      ? 'Nenhum horário em aberto no momento.'
+                      : 'Nenhum professor foi vinculado à sua conta.'}
                 </div>
               )}
             </div>
@@ -339,7 +351,7 @@ export const StudentBookingView: React.FC = () => {
         isOpen={Boolean(selectedSlot)}
         onClose={() => setSelectedSlot(null)}
         title="Confirmar Reserva de Aula de Inglês"
-        description={`Sessão individual com ${teacherName}.`}
+        description={teacherName ? `Sessão individual com ${teacherName}.` : 'Sessão individual.'}
       >
         {selectedSlot && (
           <div className="space-y-4 text-xs">

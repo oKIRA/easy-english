@@ -24,53 +24,77 @@ import { useToast } from '../../shared/design-system/Toast';
 
 export const TeacherIntegrationsView: React.FC = () => {
   const { currentUser } = useAuth();
-  const teacherId = currentUser?.uid || 'demo-teacher-01';
+  const teacherId = currentUser?.uid || '';
 
   // Integration States
-  const [zoomConnected, setZoomConnected] = useState(true);
-  const [zoomMeetingId, setZoomMeetingId] = useState('984 5120 7841');
-  const [zoomPasscode, setZoomPasscode] = useState('EasyEnglish2026');
+  const [zoomConnected, setZoomConnected] = useState(false);
+  const [zoomMeetingId, setZoomMeetingId] = useState('');
+  const [zoomPasscode, setZoomPasscode] = useState('');
 
-  const [calendarConnected, setCalendarConnected] = useState(true);
-  const [calendarEmail, setCalendarEmail] = useState(currentUser?.email || 'michael.davies@easyenglish.edu');
-  const [autoSync, setAutoSync] = useState(true);
+  const [calendarConnected, setCalendarConnected] = useState(false);
+  const [calendarEmail, setCalendarEmail] = useState(currentUser?.email || '');
+  const [autoSync, setAutoSync] = useState(false);
 
   // Modal: Zoom Settings
   const [isZoomModalOpen, setIsZoomModalOpen] = useState(false);
   const [tempMeetingId, setTempMeetingId] = useState(zoomMeetingId);
   const [tempPasscode, setTempPasscode] = useState(zoomPasscode);
 
-  const { success, info } = useToast();
+  const { success, info, error } = useToast();
 
   useEffect(() => {
     async function loadIntegrationConfig() {
+      if (!teacherId) return;
       try {
-        const snap = await getDoc(doc(db, 'integrationConnections', `${teacherId}-zoom`));
-        if (snap.exists()) {
-          const data = snap.data();
+        const [zoomSnapshot, calendarSnapshot] = await Promise.all([
+          getDoc(doc(db, 'integrationConnections', `${teacherId}-zoom`)),
+          getDoc(doc(db, 'integrationConnections', `${teacherId}-calendar`)),
+        ]);
+        if (zoomSnapshot.exists()) {
+          const data = zoomSnapshot.data();
           setZoomConnected(data.status === 'connected');
-          if (data.externalAccountId) setZoomMeetingId(data.externalAccountId);
+          setZoomMeetingId(String(data.externalAccountId || ''));
+          setZoomPasscode(String(data.passcode || ''));
         }
-      } catch {}
+        if (calendarSnapshot.exists()) {
+          const data = calendarSnapshot.data();
+          setCalendarConnected(data.status === 'connected');
+          setCalendarEmail(String(data.externalAccountId || currentUser?.email || ''));
+          setAutoSync(data.autoSync === true);
+        }
+      } catch (loadError) {
+        console.error('Failed to load teacher integrations:', loadError);
+        error('Não foi possível carregar suas integrações', String(loadError));
+      }
     }
-    loadIntegrationConfig();
-  }, [teacherId]);
+    void loadIntegrationConfig();
+  }, [teacherId, currentUser?.email, error]);
 
   const handleToggleZoom = async () => {
+    if (!teacherId) {
+      error('Não foi possível identificar o professor autenticado.');
+      return;
+    }
     const nextState = !zoomConnected;
     setZoomConnected(nextState);
-    await setDoc(
-      doc(db, 'integrationConnections', `${teacherId}-zoom`),
-      {
-        userId: teacherId,
-        provider: 'zoom',
-        status: nextState ? 'connected' : 'disconnected',
-        scopes: ['meeting:write', 'meeting:read'],
-        externalAccountId: zoomMeetingId,
-        updatedAt: new Date().toISOString(),
-      },
-      { merge: true }
-    );
+    try {
+      await setDoc(
+        doc(db, 'integrationConnections', `${teacherId}-zoom`),
+        {
+          userId: teacherId,
+          provider: 'zoom',
+          status: nextState ? 'connected' : 'disconnected',
+          scopes: ['meeting:write', 'meeting:read'],
+          externalAccountId: zoomMeetingId,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+    } catch (saveError) {
+      setZoomConnected(!nextState);
+      error('Falha ao atualizar a integração Zoom', String(saveError));
+      return;
+    }
     if (nextState) {
       success('Zoom Conectado', 'Aulas agendadas gerarão links de videoconferência automaticamente.');
     } else {
@@ -79,20 +103,31 @@ export const TeacherIntegrationsView: React.FC = () => {
   };
 
   const handleToggleCalendar = async () => {
+    if (!teacherId) {
+      error('Não foi possível identificar o professor autenticado.');
+      return;
+    }
     const nextState = !calendarConnected;
     setCalendarConnected(nextState);
-    await setDoc(
-      doc(db, 'integrationConnections', `${teacherId}-calendar`),
-      {
-        userId: teacherId,
-        provider: 'google_calendar',
-        status: nextState ? 'connected' : 'disconnected',
-        scopes: ['https://www.googleapis.com/auth/calendar.events'],
-        externalAccountId: calendarEmail,
-        updatedAt: new Date().toISOString(),
-      },
-      { merge: true }
-    );
+    try {
+      await setDoc(
+        doc(db, 'integrationConnections', `${teacherId}-calendar`),
+        {
+          userId: teacherId,
+          provider: 'google_calendar',
+          status: nextState ? 'connected' : 'disconnected',
+          scopes: ['https://www.googleapis.com/auth/calendar.events'],
+          externalAccountId: calendarEmail,
+          autoSync,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+    } catch (saveError) {
+      setCalendarConnected(!nextState);
+      error('Falha ao atualizar a integração Google Agenda', String(saveError));
+      return;
+    }
     if (nextState) {
       success('Google Calendar Conectado', 'Suas aulas serão sincronizadas à sua agenda Google.');
     } else {
@@ -141,11 +176,11 @@ export const TeacherIntegrationsView: React.FC = () => {
               <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500">ID de Reunião do Docente:</span>
-                  <span className="font-mono font-bold text-slate-900">{zoomMeetingId}</span>
+                  <span className="font-mono font-bold text-slate-900">{zoomMeetingId || 'Não configurado'}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500">Senha / Passcode:</span>
-                  <span className="font-mono text-slate-700">{zoomPasscode}</span>
+                  <span className="font-mono text-slate-700">{zoomPasscode || 'Não configurada'}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500">Permissão OAuth:</span>

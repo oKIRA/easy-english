@@ -17,6 +17,8 @@ import {
   updateDoc,
   query,
   where,
+  writeBatch,
+  deleteField,
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../../infrastructure/firebase/firebase';
@@ -63,8 +65,36 @@ export const RelationshipManagement: React.FC = () => {
         if (u.role === 'teacher') tList.push(u);
         if (u.role === 'student') sList.push(u);
       });
+
+      const activeRelationships = relList
+        .filter((relationship) => relationship.status === 'active')
+        .sort((left, right) => String(left.assignedAt).localeCompare(String(right.assignedAt)));
+      const activeRelationshipByStudent = new Map<string, TeacherStudentRelationship>();
+      activeRelationships.forEach((relationship) => {
+        activeRelationshipByStudent.set(relationship.studentId, relationship);
+      });
+      const assignmentsToSync = sList.filter((student) => {
+        const activeRelationship = activeRelationshipByStudent.get(student.uid);
+        return student.activeTeacherId !== activeRelationship?.teacherId;
+      });
+      for (let offset = 0; offset < assignmentsToSync.length; offset += 450) {
+        const batch = writeBatch(db);
+        assignmentsToSync.slice(offset, offset + 450).forEach((student) => {
+          const activeRelationship = activeRelationshipByStudent.get(student.uid);
+          batch.update(doc(db, 'users', student.uid), activeRelationship
+            ? { activeTeacherId: activeRelationship.teacherId }
+            : { activeTeacherId: deleteField() });
+        });
+        await batch.commit();
+      }
+
       setTeachers(tList);
-      setStudents(sList);
+      setStudents(sList.map((student) => {
+        const relationship = activeRelationshipByStudent.get(student.uid);
+        if (relationship) return { ...student, activeTeacherId: relationship.teacherId };
+        const { activeTeacherId: _activeTeacherId, ...unassignedStudent } = student;
+        return unassignedStudent;
+      }));
     } catch (e) {
       console.error(e);
       error('Falha ao carregar vínculos e usuários');
@@ -88,20 +118,18 @@ export const RelationshipManagement: React.FC = () => {
       setIsSubmitting(true);
 
       // Rule: check if student already has an active relationship
-      const activeExisting = relationships.find(
+      const activeExisting = relationships.filter(
         (r) => r.studentId === selectedStudentId && r.status === 'active'
       );
 
-      if (activeExisting) {
-        // Enforce: Encerrar vínculo anterior antes de efetivar transferência
+      if (activeExisting.length === 1) {
+        if (activeExisting[0].teacherId === selectedTeacherId) {
+          error('Este aluno já está vinculado ao professor selecionado.');
+          return;
+        }
         info('Transferência detectada', 'Encerrando automaticamente o vínculo anterior do aluno...');
-        await updateDoc(doc(db, 'teacherStudentRelationships', activeExisting.id), {
-          status: 'ended',
-          endedAt: new Date().toISOString(),
-          endedBy: 'admin',
-          endReason: `Transferência administrativa para outro docente (${selectedTeacherId})`,
-          updatedAt: serverTimestamp(),
-        });
+      } else if (activeExisting.length > 1) {
+        info('Vínculos duplicados detectados', 'Os vínculos ativos anteriores serão encerrados antes da nova atribuição.');
       }
 
       const relId = `rel-${Date.now()}`;
@@ -116,11 +144,25 @@ export const RelationshipManagement: React.FC = () => {
         updatedAt: new Date().toISOString(),
       };
 
-      await setDoc(doc(db, 'teacherStudentRelationships', relId), {
+      const bindingBatch = writeBatch(db);
+      activeExisting.forEach((relationship) => {
+        bindingBatch.update(doc(db, 'teacherStudentRelationships', relationship.id), {
+          status: 'ended',
+          endedAt: new Date().toISOString(),
+          endedBy: 'admin',
+          endReason: `Transferência administrativa para outro docente (${selectedTeacherId})`,
+          updatedAt: serverTimestamp(),
+        });
+      });
+      bindingBatch.set(doc(db, 'teacherStudentRelationships', relId), {
         ...newRel,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
+      bindingBatch.update(doc(db, 'users', selectedStudentId), {
+        activeTeacherId: selectedTeacherId,
+      });
+      await bindingBatch.commit();
 
       // Audit Log
       await setDoc(doc(db, 'auditLogs', `log-${Date.now()}`), {
@@ -153,13 +195,26 @@ export const RelationshipManagement: React.FC = () => {
     if (!endTargetRel) return;
 
     try {
-      await updateDoc(doc(db, 'teacherStudentRelationships', endTargetRel.id), {
+      const replacement = relationships
+        .filter((relationship) =>
+          relationship.studentId === endTargetRel.studentId
+          && relationship.id !== endTargetRel.id
+          && relationship.status === 'active'
+        )
+        .sort((left, right) => String(right.assignedAt).localeCompare(String(left.assignedAt)))[0];
+      const endingBatch = writeBatch(db);
+      endingBatch.update(doc(db, 'teacherStudentRelationships', endTargetRel.id), {
         status: 'ended',
         endedAt: new Date().toISOString(),
         endedBy: 'admin',
         endReason: endReason || 'Encerrado pela coordenação',
         updatedAt: serverTimestamp(),
       });
+      endingBatch.update(
+        doc(db, 'users', endTargetRel.studentId),
+        replacement ? { activeTeacherId: replacement.teacherId } : { activeTeacherId: deleteField() }
+      );
+      await endingBatch.commit();
 
       // Audit Log
       await setDoc(doc(db, 'auditLogs', `log-${Date.now()}`), {

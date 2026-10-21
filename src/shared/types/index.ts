@@ -12,6 +12,7 @@ export interface User {
   createdAt: string;
   updatedAt: string;
   createdBy?: string | null;
+  activeTeacherId?: string;
 }
 
 export interface BookingSettings {
@@ -35,11 +36,11 @@ export interface TeacherProfile {
 
 export interface StudentProfile {
   studentId: string;
-  englishLevel: 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2' | 'Beginner' | 'Intermediate' | 'Advanced';
-  learningGoals: string[];
+  englishLevel?: 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2' | 'Beginner' | 'Intermediate' | 'Advanced';
+  learningGoals?: string[];
   notes?: string | null;
-  createdAt: string;
-  updatedAt: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface TeacherStudentRelationship {

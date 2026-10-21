@@ -18,7 +18,7 @@ import { Input } from '../../shared/design-system/Input';
 
 export const StudentMaterialsView: React.FC = () => {
   const { currentUser } = useAuth();
-  const studentId = currentUser?.uid || 'demo-student-01';
+  const studentId = currentUser?.uid;
 
   const [materials, setMaterials] = useState<LearningAsset[]>([]);
   const [search, setSearch] = useState('');
@@ -26,6 +26,12 @@ export const StudentMaterialsView: React.FC = () => {
 
   useEffect(() => {
     async function loadMaterials() {
+      if (!studentId) {
+        setMaterials([]);
+        setLoading(false);
+        return;
+      }
+
       try {
         setLoading(true);
         // Find assigned teacher
@@ -37,8 +43,11 @@ export const StudentMaterialsView: React.FC = () => {
           )
         );
 
-        let teacherId = 'demo-teacher-01';
-        relSnap.forEach((d) => (teacherId = d.data().teacherId));
+        const teacherId = relSnap.docs[0]?.data().teacherId as string | undefined;
+        if (!teacherId) {
+          setMaterials([]);
+          return;
+        }
 
         const snap = await getDocs(
           query(
@@ -114,7 +123,7 @@ export const StudentMaterialsView: React.FC = () => {
                 </div>
                 <h3 className="text-xs font-bold text-slate-900 line-clamp-1">{m.title}</h3>
                 <p className="text-[11px] text-slate-500 line-clamp-2 mt-1 leading-relaxed">
-                  {m.description || 'Apostila recomendada para fixação de vocabulário e exercícios práticos.'}
+                  {m.description || 'Sem descrição.'}
                 </p>
               </div>
 

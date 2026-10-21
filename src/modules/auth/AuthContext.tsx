@@ -128,7 +128,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const role = isBootstrapAdmin ? 'admin' : invitation?.role || 'student';
             const newUser: User = {
               uid: fbUser.uid,
-              name: invitation?.name || fbUser.displayName || 'Novo Usuário',
+              name: invitation?.name || fbUser.displayName || '',
               email,
               photoURL: fbUser.photoURL || null,
               role,
@@ -148,9 +148,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (role === 'teacher') {
               batch.set(doc(db, 'teacherProfiles', fbUser.uid), {
                 teacherId: fbUser.uid,
-                bio: 'Professor de inglês credenciado pela coordenação acadêmica.',
+                bio: '',
                 specialties: invitation?.specialties || [],
-                languages: ['Inglês', 'Português'],
+                languages: [],
                 timezone: 'America/Sao_Paulo',
                 bookingSettings: {
                   slotDurationMinutes: 45,

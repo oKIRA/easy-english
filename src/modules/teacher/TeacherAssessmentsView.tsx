@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import {
   collection,
+  getDoc,
   getDocs,
   doc,
   setDoc,
@@ -38,6 +39,7 @@ export const TeacherAssessmentsView: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'assessments' | 'submissions'>('submissions');
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [results, setResults] = useState<AssessmentResult[]>([]);
+  const [studentNames, setStudentNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
   // New Assessment modal
@@ -83,8 +85,25 @@ export const TeacherAssessmentsView: React.FC = () => {
       const rList: AssessmentResult[] = [];
       rSnap.forEach((d) => rList.push({ id: d.id, ...d.data() } as AssessmentResult));
       setResults(rList);
+      const relSnap = await getDocs(query(
+        collection(db, 'teacherStudentRelationships'),
+        where('teacherId', '==', teacherId),
+        where('status', '==', 'active')
+      ));
+      const activeStudentIds = new Set(relSnap.docs.map((relationship) => relationship.data().studentId));
+      const assignedStudentIds = [...new Set(rList.map((result) => result.studentId))]
+        .filter((studentId) => activeStudentIds.has(studentId));
+      const studentSnapshots = await Promise.all(
+        assignedStudentIds.map((studentId) => getDoc(doc(db, 'users', studentId)))
+      );
+      const names: Record<string, string> = {};
+      studentSnapshots.forEach((student) => {
+        if (student.exists()) names[student.id] = String(student.data().name || '');
+      });
+      setStudentNames(names);
     } catch (e) {
-      console.warn('Using default assessments data', e);
+      console.error('Failed to load assessments:', e);
+      error('Não foi possível carregar avaliações e envios', String(e));
     } finally {
       setLoading(false);
     }
@@ -258,7 +277,7 @@ export const TeacherAssessmentsView: React.FC = () => {
                     <td className="px-4 py-3.5">
                       <div className="flex items-center gap-2">
                         <UserCheck className="w-4 h-4 text-blue-600" />
-                        <span className="font-semibold text-slate-900">Beatriz Santos</span>
+                        <span className="font-semibold text-slate-900">{studentNames[r.studentId] || 'Aluno'}</span>
                       </div>
                     </td>
                     <td className="px-4 py-3.5 text-slate-600">
