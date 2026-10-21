@@ -12,15 +12,16 @@ export const easyEnglishFirebaseConfig = {
   projectId: "easy-english-4c948",
   storageBucket: "easy-english-4c948.firebasestorage.app",
   messagingSenderId: "223346557736",
-  appId: "1:223346557736:web:f6d4bbb26f8460f85cc61d",
-  measurementId: "G-ETRQNFWXCP"
+  appId: "1:223346557736:web:0e58c62ad5f6c3f65cc61d",
+  measurementId: "G-08NCRN4WLR"
 };
 
-// Detect whether we are running on custom production hosting (easy-english-4c948)
-// or inside the AI Studio development preview environment.
+// Use the Easy English project on its production domain and local development hosts.
 const isCustomHosting =
   typeof window !== 'undefined' &&
-  (window.location.hostname.includes('easy-english') ||
+  (window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1' ||
+    window.location.hostname.includes('easy-english') ||
     window.location.hostname.includes('web.app') ||
     window.location.hostname.includes('firebaseapp.com') ||
     localStorage.getItem('FORCE_EASY_ENGLISH_FIREBASE') === 'true');

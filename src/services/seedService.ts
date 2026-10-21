@@ -7,7 +7,40 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { db } from '../infrastructure/firebase/firebase';
-import { DEMO_USERS } from '../modules/auth/AuthContext';
+import { User } from '../shared/types';
+
+const DEMO_USERS: Record<string, User> = {
+  admin: {
+    uid: 'demo-admin-01',
+    name: 'Helena Rocha (Admin)',
+    email: 'admin.helena@easyenglish.edu',
+    role: 'admin',
+    status: 'active',
+    timezone: 'America/Sao_Paulo',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+  teacher: {
+    uid: 'demo-teacher-01',
+    name: 'Prof. Michael Davies (Teacher)',
+    email: 'michael.davies@easyenglish.edu',
+    role: 'teacher',
+    status: 'active',
+    timezone: 'America/Sao_Paulo',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+  student: {
+    uid: 'demo-student-01',
+    name: 'Beatriz Santos (Student)',
+    email: 'beatriz.santos@student.easyenglish.edu',
+    role: 'student',
+    status: 'active',
+    timezone: 'America/Sao_Paulo',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+};
 
 export async function isDatabaseSeeded(): Promise<boolean> {
   try {

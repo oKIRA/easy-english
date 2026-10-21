@@ -16,7 +16,6 @@ import {
   ChevronLeft,
   ChevronRight,
   LogOut,
-  Sparkles,
 } from 'lucide-react';
 import { useAuth } from '../../modules/auth/AuthContext';
 import { Badge } from '../design-system/Badge';
@@ -38,7 +37,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isCollapsed = false,
   onToggleCollapse,
 }) => {
-  const { currentUser, activeRole, isDemoMode, signOut } = useAuth();
+  const { currentUser, activeRole, signOut } = useAuth();
 
   // Navigation Items per Role
   const studentNav = [
@@ -181,7 +180,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </p>
               </div>
             )}
-            {!isCollapsed && !isDemoMode && (
+            {!isCollapsed && (
               <button
                 onClick={() => signOut()}
                 className="p-1 rounded text-slate-400 hover:text-rose-600 transition-colors"

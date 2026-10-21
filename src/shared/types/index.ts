@@ -151,6 +151,7 @@ export interface AssessmentResult {
   studentId: string;
   teacherId: string;
   score: number;
+  maxScore?: number;
   feedback?: string;
   answers?: Record<string, string>;
   status: 'pending' | 'submitted' | 'graded';

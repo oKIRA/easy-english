@@ -8,6 +8,7 @@ import {
   FileCheck,
   UserCheck,
   HelpCircle,
+  Trash2,
 } from 'lucide-react';
 import {
   collection,
@@ -32,7 +33,7 @@ import { useToast } from '../../shared/design-system/Toast';
 
 export const TeacherAssessmentsView: React.FC = () => {
   const { currentUser } = useAuth();
-  const teacherId = currentUser?.uid || 'demo-teacher-01';
+  const teacherId = currentUser!.uid;
 
   const [activeTab, setActiveTab] = useState<'assessments' | 'submissions'>('submissions');
   const [assessments, setAssessments] = useState<Assessment[]>([]);
@@ -43,8 +44,7 @@ export const TeacherAssessmentsView: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [assessmentType, setAssessmentType] = useState<Assessment['assessmentType']>('quiz');
-  const [maxScore, setMaxScore] = useState(100);
+  const [questions, setQuestions] = useState<AssessmentQuestion[]>(() => [createQuestion()]);
 
   // Grade Modal
   const [selectedResult, setSelectedResult] = useState<AssessmentResult | null>(null);
@@ -53,6 +53,17 @@ export const TeacherAssessmentsView: React.FC = () => {
   const [isGrading, setIsGrading] = useState(false);
 
   const { success, error } = useToast();
+
+  function createQuestion(): AssessmentQuestion {
+    return {
+      id: `question-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      prompt: '',
+      type: 'multiple_choice',
+      options: ['', ''],
+      correctAnswer: '',
+      points: 1,
+    };
+  }
 
   const loadAssessmentsData = async () => {
     try {
@@ -85,41 +96,24 @@ export const TeacherAssessmentsView: React.FC = () => {
 
   const handleCreateAssessment = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (questions.some((question) => !question.correctAnswer || !question.options?.includes(question.correctAnswer))) {
+      error('Selecione a alternativa correta de cada pergunta.');
+      return;
+    }
+
     try {
       const assessmentId = `eval-${Date.now()}`;
-      const sampleQuestions: AssessmentQuestion[] = [
-        {
-          id: 'q1',
-          prompt: 'Qual é o modal verb adequado para expressar obrigação em contratos corporativos?',
-          type: 'multiple_choice',
-          options: ['Shall', 'Might', 'Could', 'Would'],
-          correctAnswer: 'Shall',
-          points: 50,
-        },
-        {
-          id: 'q2',
-          prompt: 'Identifique a forma correta do Second Conditional para negociação hipotética:',
-          type: 'multiple_choice',
-          options: [
-            'If we offered a 10% discount, would you commit to 500 units?',
-            'If we will offer discount, will you buy?',
-            'If we had offered, we would buy.',
-            'If we offer, we bought.',
-          ],
-          correctAnswer: 'If we offered a 10% discount, would you commit to 500 units?',
-          points: 50,
-        },
-      ];
+      const maxScore = questions.reduce((total, question) => total + question.points, 0);
 
       const newEval: Assessment = {
         id: assessmentId,
         teacherId,
         title,
         description,
-        assessmentType,
-        maxScore: Number(maxScore),
-        passingScore: 70,
-        questions: sampleQuestions,
+        assessmentType: 'quiz',
+        maxScore,
+        passingScore: Math.ceil(maxScore * 0.7),
+        questions,
         status: 'published',
         dueAt: new Date(Date.now() + 14 * 86400000).toISOString(),
         createdAt: new Date().toISOString(),
@@ -139,7 +133,7 @@ export const TeacherAssessmentsView: React.FC = () => {
         action: 'CREATE_ASSESSMENT',
         entityType: 'assessments',
         entityId: assessmentId,
-        metadata: { title },
+        metadata: { title, questionCount: questions.length },
         createdAt: new Date().toISOString(),
       });
 
@@ -147,6 +141,7 @@ export const TeacherAssessmentsView: React.FC = () => {
       setIsModalOpen(false);
       setTitle('');
       setDescription('');
+      setQuestions(() => [createQuestion()]);
       success('Avaliação criada e disponibilizada aos alunos!');
     } catch (err) {
       error('Falha ao criar avaliação', String(err));
@@ -155,10 +150,12 @@ export const TeacherAssessmentsView: React.FC = () => {
 
   const handleSaveGrade = async () => {
     if (!selectedResult) return;
+    const maxScore = selectedResult.maxScore ?? 100;
+    const score = Math.min(maxScore, Math.max(0, Number(gradeScore)));
     try {
       setIsGrading(true);
       await updateDoc(doc(db, 'assessmentResults', selectedResult.id), {
-        score: Number(gradeScore),
+        score,
         feedback: gradeFeedback,
         status: 'graded',
         gradedBy: teacherId,
@@ -171,7 +168,7 @@ export const TeacherAssessmentsView: React.FC = () => {
         userId: selectedResult.studentId,
         type: 'new_grade',
         title: 'Nova Nota Disponível',
-        message: `Sua avaliação foi corrigida pelo Prof. ${currentUser?.name || 'Docente'}. Nota: ${gradeScore}/100.`,
+        message: `Sua avaliação foi corrigida pelo Prof. ${currentUser?.name || 'Docente'}. Nota: ${score}/${maxScore}.`,
         relatedEntityId: selectedResult.id,
         readAt: null,
         createdAt: new Date().toISOString(),
@@ -185,14 +182,14 @@ export const TeacherAssessmentsView: React.FC = () => {
         entityType: 'assessmentResults',
         entityId: selectedResult.id,
         targetUserId: selectedResult.studentId,
-        metadata: { score: gradeScore, feedback: gradeFeedback },
+        metadata: { score, maxScore, feedback: gradeFeedback },
         createdAt: new Date().toISOString(),
       });
 
       setResults((prev) =>
         prev.map((r) =>
           r.id === selectedResult.id
-            ? { ...r, score: Number(gradeScore), feedback: gradeFeedback, status: 'graded' }
+            ? { ...r, score, maxScore, feedback: gradeFeedback, status: 'graded' }
             : r
         )
       );
@@ -208,7 +205,7 @@ export const TeacherAssessmentsView: React.FC = () => {
 
   const openGradeModal = (res: AssessmentResult) => {
     setSelectedResult(res);
-    setGradeScore(res.score || 85);
+    setGradeScore(res.score ?? Math.min(85, res.maxScore ?? 100));
     setGradeFeedback(res.feedback || '');
   };
 
@@ -265,11 +262,11 @@ export const TeacherAssessmentsView: React.FC = () => {
                       </div>
                     </td>
                     <td className="px-4 py-3.5 text-slate-600">
-                      Quiz: Estruturas Diplomáticas em Reuniões
+                      {assessments.find((assessment) => assessment.id === r.assessmentId)?.title || 'Avaliação'}
                     </td>
                     <td className="px-4 py-3.5">
                       <span className="text-sm font-bold text-slate-900">{r.score}</span>
-                      <span className="text-slate-400 text-[10px]"> / 100</span>
+                      <span className="text-slate-400 text-[10px]"> / {r.maxScore ?? 100}</span>
                     </td>
                     <td className="px-4 py-3.5">
                       <Badge variant={r.status === 'graded' ? 'emerald' : 'amber'}>
@@ -321,7 +318,7 @@ export const TeacherAssessmentsView: React.FC = () => {
                 <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">{a.description}</p>
                 <div className="mt-3 text-[10px] text-slate-400 flex items-center gap-1">
                   <HelpCircle className="w-3.5 h-3.5" />
-                  <span>{a.questions?.length || 2} questões interativas</span>
+                  <span>{a.questions?.length || 0} questões interativas</span>
                 </div>
               </div>
 
@@ -340,60 +337,187 @@ export const TeacherAssessmentsView: React.FC = () => {
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title="Criar Nova Avaliação / Quiz"
-        description="Elabore testes formativos com correção automática ou notas manuais."
+        title="Criar novo quiz"
+        description="Escreva suas perguntas, personalize as alternativas e marque a resposta correta."
+        maxWidth="3xl"
       >
-        <form onSubmit={handleCreateAssessment} className="space-y-4 text-xs">
+        <form onSubmit={handleCreateAssessment} className="space-y-5 text-xs">
           <Input
-            label="Título da Avaliação"
-            placeholder="Ex: Unit 2 Review: Phrasal Verbs & Prepositions"
+            label="Título do quiz"
+            placeholder="Ex.: Revisão da Unidade 2"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             required
           />
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Tipo de Instrumento</label>
-              <select
-                value={assessmentType}
-                onChange={(e) => setAssessmentType(e.target.value as any)}
-                className="w-full rounded-lg border border-slate-300 bg-white p-2 text-xs"
-              >
-                <option value="quiz">Quiz de Múltipla Escolha</option>
-                <option value="essay">Redação / Writing Task</option>
-                <option value="speaking">Speaking / Gravação de Áudio</option>
-                <option value="reading">Reading & Compreensão de Texto</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Pontuação Máxima</label>
-              <input
-                type="number"
-                value={maxScore}
-                onChange={(e) => setMaxScore(Number(e.target.value))}
-                className="w-full rounded-lg border border-slate-300 p-2 text-xs"
-              />
-            </div>
-          </div>
-
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Orientações para o Aluno</label>
+            <label className="mb-1 block text-xs font-semibold text-slate-700">Orientações para o aluno</label>
             <textarea
               rows={3}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Instruções de tempo, vocabulário esperado e critérios de avaliação..."
+              placeholder="Explique o que o aluno precisa saber antes de responder."
               className="w-full rounded-lg border border-slate-300 p-2 text-xs"
               required
             />
+          </div>
+
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+              <div>
+                <h4 className="font-bold text-slate-900">Perguntas e alternativas</h4>
+                <p className="mt-1 text-[11px] text-slate-500">
+                  Adicione quantas perguntas precisar. Cada pergunta pode ter seu próprio número de alternativas.
+                </p>
+              </div>
+              <span className="rounded-lg bg-blue-50 px-3 py-2 font-semibold text-blue-800">
+                Pontuação total: {questions.reduce((total, question) => total + question.points, 0)}
+              </span>
+            </div>
+
+            {questions.map((question, questionIndex) => (
+              <section key={question.id} className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <h5 className="font-bold text-slate-800">Pergunta {questionIndex + 1}</h5>
+                  <div className="flex items-center gap-2">
+                    <label htmlFor={`${question.id}-points`} className="text-[11px] font-medium text-slate-600">
+                      Pontos
+                    </label>
+                    <input
+                      id={`${question.id}-points`}
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={question.points}
+                      onChange={(event) => {
+                        const points = Math.max(1, Number(event.target.value) || 1);
+                        setQuestions((current) =>
+                          current.map((item) => item.id === question.id ? { ...item, points } : item)
+                        );
+                      }}
+                      className="w-20 rounded-lg border border-slate-300 bg-white p-2 text-xs"
+                      aria-label={`Pontos da pergunta ${questionIndex + 1}`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setQuestions((current) => current.filter((item) => item.id !== question.id))}
+                      disabled={questions.length === 1}
+                      className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-40"
+                      aria-label={`Remover pergunta ${questionIndex + 1}`}
+                      title="Remover pergunta"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+
+                <textarea
+                  rows={2}
+                  value={question.prompt}
+                  onChange={(event) =>
+                    setQuestions((current) =>
+                      current.map((item) => item.id === question.id ? { ...item, prompt: event.target.value } : item)
+                    )
+                  }
+                  placeholder="Digite o enunciado da pergunta"
+                  aria-label={`Enunciado da pergunta ${questionIndex + 1}`}
+                  className="w-full rounded-lg border border-slate-300 bg-white p-2.5 text-xs"
+                  required
+                />
+
+                <fieldset className="space-y-2">
+                  <legend className="text-[11px] font-semibold text-slate-700">
+                    Alternativas <span className="font-normal text-slate-500">(selecione a resposta correta)</span>
+                  </legend>
+                  {question.options?.map((option, optionIndex) => (
+                    <div key={`${question.id}-option-${optionIndex}`} className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name={`${question.id}-correct`}
+                        checked={Boolean(option) && question.correctAnswer === option}
+                        onChange={() =>
+                          setQuestions((current) =>
+                            current.map((item) =>
+                              item.id === question.id ? { ...item, correctAnswer: option } : item
+                            )
+                          )
+                        }
+                        aria-label={`Marcar alternativa ${optionIndex + 1} como correta`}
+                        required={!question.correctAnswer}
+                        className="h-4 w-4 accent-blue-600"
+                      />
+                      <input
+                        type="text"
+                        value={option}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setQuestions((current) =>
+                            current.map((item) => {
+                              if (item.id !== question.id) return item;
+                              const options = [...(item.options || [])];
+                              const previousValue = options[optionIndex];
+                              options[optionIndex] = value;
+                              return {
+                                ...item,
+                                options,
+                                correctAnswer: item.correctAnswer === previousValue && previousValue ? value : item.correctAnswer,
+                              };
+                            })
+                          );
+                        }}
+                        placeholder={`Alternativa ${optionIndex + 1}`}
+                        aria-label={`Alternativa ${optionIndex + 1} da pergunta ${questionIndex + 1}`}
+                        className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white p-2 text-xs"
+                        required
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setQuestions((current) =>
+                            current.map((item) => {
+                              if (item.id !== question.id || !item.options) return item;
+                              const options = item.options.filter((_, index) => index !== optionIndex);
+                              const correctAnswer = item.correctAnswer === option ? options[0] || '' : item.correctAnswer;
+                              return { ...item, options, correctAnswer };
+                            })
+                          )
+                        }
+                        disabled={(question.options?.length || 0) <= 2}
+                        className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-40"
+                        aria-label={`Remover alternativa ${optionIndex + 1}`}
+                        title="Remover alternativa"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setQuestions((current) =>
+                        current.map((item) =>
+                          item.id === question.id ? { ...item, options: [...(item.options || []), ''] } : item
+                        )
+                      )
+                    }
+                    className="rounded-lg px-2 py-1.5 font-semibold text-blue-700 transition-colors hover:bg-blue-50"
+                  >
+                    + Adicionar alternativa
+                  </button>
+                </fieldset>
+              </section>
+            ))}
+
+            <Button type="button" variant="outline" onClick={() => setQuestions((current) => [...current, createQuestion()])}>
+              + Adicionar pergunta
+            </Button>
           </div>
 
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="ghost" type="button" onClick={() => setIsModalOpen(false)}>
               Cancelar
             </Button>
-            <Button type="submit">Publicar Avaliação</Button>
+            <Button type="submit">Publicar quiz</Button>
           </div>
         </form>
       </Modal>
@@ -408,12 +532,12 @@ export const TeacherAssessmentsView: React.FC = () => {
         <div className="space-y-4 text-xs">
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1">
-              Nota Final (0 a 100)
+              Nota Final (0 a {selectedResult?.maxScore ?? 100})
             </label>
             <input
               type="number"
               min={0}
-              max={100}
+              max={selectedResult?.maxScore ?? 100}
               value={gradeScore}
               onChange={(e) => setGradeScore(Number(e.target.value))}
               className="w-full rounded-lg border border-slate-300 p-2 text-sm font-bold text-slate-900"

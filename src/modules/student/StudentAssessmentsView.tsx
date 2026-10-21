@@ -19,7 +19,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../../infrastructure/firebase/firebase';
 import { useAuth } from '../auth/AuthContext';
-import { Assessment, AssessmentResult, AssessmentQuestion } from '../../shared/types';
+import { Assessment, AssessmentResult } from '../../shared/types';
 import { Button } from '../../shared/design-system/Button';
 import { Badge } from '../../shared/design-system/Badge';
 import { Card, CardHeader } from '../../shared/design-system/Card';
@@ -28,7 +28,7 @@ import { useToast } from '../../shared/design-system/Toast';
 
 export const StudentAssessmentsView: React.FC = () => {
   const { currentUser } = useAuth();
-  const studentId = currentUser?.uid || 'demo-student-01';
+  const studentId = currentUser!.uid;
 
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [results, setResults] = useState<AssessmentResult[]>([]);
@@ -77,11 +77,15 @@ export const StudentAssessmentsView: React.FC = () => {
 
   const handleSubmitQuiz = async () => {
     if (!activeQuiz) return;
+    const questions = activeQuiz.questions || [];
+    if (!questions.length || questions.some((question) => !selectedAnswers[question.id])) {
+      error('Responda todas as perguntas antes de enviar o quiz.');
+      return;
+    }
 
     try {
       setIsSubmitting(true);
       let calculatedScore = 0;
-      const questions = activeQuiz.questions || [];
 
       // Calculate score based on correct answers
       questions.forEach((q) => {
@@ -97,11 +101,9 @@ export const StudentAssessmentsView: React.FC = () => {
         studentId,
         teacherId: activeQuiz.teacherId,
         score: calculatedScore,
+        maxScore: activeQuiz.maxScore,
         answers: selectedAnswers,
-        feedback:
-          calculatedScore >= (activeQuiz.passingScore || 70)
-            ? 'Ótimo desempenho nas estruturas gramaticais e modais diplomáticos!'
-            : 'Bom esforço. Sugiro revisar o uso de Second e Third Conditional antes da próxima aula.',
+        feedback: 'Quiz corrigido automaticamente.',
         status: 'graded',
         gradedBy: activeQuiz.teacherId,
         gradedAt: new Date().toISOString(),
@@ -122,7 +124,7 @@ export const StudentAssessmentsView: React.FC = () => {
         action: 'SUBMIT_ASSESSMENT',
         entityType: 'assessmentResults',
         entityId: resultId,
-        metadata: { score: calculatedScore },
+        metadata: { score: calculatedScore, maxScore: activeQuiz.maxScore },
         createdAt: new Date().toISOString(),
       });
 
@@ -202,10 +204,10 @@ export const StudentAssessmentsView: React.FC = () => {
                 <Card key={r.id} className="border-l-4 border-l-purple-600">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs font-bold text-slate-900">
-                      Quiz: Estruturas Diplomáticas e Condicionais
+                      {assessments.find((assessment) => assessment.id === r.assessmentId)?.title || 'Quiz'}
                     </span>
-                    <Badge variant={r.score >= 70 ? 'emerald' : 'amber'} size="sm">
-                      Nota: {r.score} / 100
+                    <Badge variant={r.score >= (r.maxScore ?? 100) * 0.7 ? 'emerald' : 'amber'} size="sm">
+                      Nota: {r.score} / {r.maxScore ?? 100}
                     </Badge>
                   </div>
 
@@ -263,7 +265,7 @@ export const StudentAssessmentsView: React.FC = () => {
                   {(activeQuiz.questions || []).map((q, qIndex) => (
                     <div key={q.id} className="p-4 rounded-xl border border-slate-200 bg-white space-y-3 shadow-2xs">
                       <p className="font-bold text-slate-900 text-xs">
-                        Questão {qIndex + 1}: {q.prompt}
+                        Pergunta {qIndex + 1}: {q.prompt}
                       </p>
                       <div className="space-y-2">
                         {(q.options || []).map((opt) => {
@@ -298,7 +300,11 @@ export const StudentAssessmentsView: React.FC = () => {
                   <Button variant="ghost" onClick={() => setActiveQuiz(null)}>
                     Cancelar
                   </Button>
-                  <Button onClick={handleSubmitQuiz} isLoading={isSubmitting}>
+                  <Button
+                    onClick={handleSubmitQuiz}
+                    isLoading={isSubmitting}
+                    disabled={(activeQuiz.questions || []).some((question) => !selectedAnswers[question.id])}
+                  >
                     Enviar Respostas para Correção
                   </Button>
                 </div>

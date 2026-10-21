@@ -13,11 +13,13 @@ import {
   collection,
   getDocs,
   doc,
+  deleteDoc,
   updateDoc,
   setDoc,
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../../infrastructure/firebase/firebase';
+import { useAuth } from '../auth/AuthContext';
 import { User, UserRole, UserStatus } from '../../shared/types';
 import { Button } from '../../shared/design-system/Button';
 import { Badge } from '../../shared/design-system/Badge';
@@ -25,107 +27,48 @@ import { Input } from '../../shared/design-system/Input';
 import { Modal } from '../../shared/design-system/Modal';
 import { useToast } from '../../shared/design-system/Toast';
 
+interface UserInvitation {
+  name: string;
+  email: string;
+  role: UserRole;
+  specialties?: string[];
+  createdAt: string;
+}
+
 export const UserManagement: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
+  const [invitations, setInvitations] = useState<UserInvitation[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<'all' | UserRole>('all');
   const [loading, setLoading] = useState(true);
 
-  // Modal create teacher state
-  const [isCreateTeacherOpen, setIsCreateTeacherOpen] = useState(false);
-  const [teacherName, setTeacherName] = useState('');
-  const [teacherEmail, setTeacherEmail] = useState('');
+  const [isCreateInvitationOpen, setIsCreateInvitationOpen] = useState(false);
+  const [inviteName, setInviteName] = useState('');
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState<'teacher' | 'student'>('teacher');
   const [specialties, setSpecialties] = useState('Business English, Conversação');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const { success, error } = useToast();
+  const { currentUser } = useAuth();
 
   const loadUsers = async () => {
     try {
       setLoading(true);
-      const snap = await getDocs(collection(db, 'users'));
+      const [snap, invitationSnap] = await Promise.all([
+        getDocs(collection(db, 'users')),
+        getDocs(collection(db, 'userInvitations')),
+      ]);
       const list: User[] = [];
       snap.forEach((d) => list.push({ uid: d.id, ...d.data() } as User));
-      if (list.length > 0) {
-        setUsers(list);
-      } else {
-        setUsers([
-          {
-            uid: 'demo-admin-01',
-            name: 'Helena Rocha (Admin)',
-            email: 'admin.helena@easyenglish.edu',
-            role: 'admin',
-            status: 'active',
-            timezone: 'America/Sao_Paulo',
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-          {
-            uid: 'demo-teacher-01',
-            name: 'Prof. Michael Davies',
-            email: 'michael.davies@easyenglish.edu',
-            role: 'teacher',
-            status: 'active',
-            timezone: 'America/Sao_Paulo',
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-          {
-            uid: 'demo-student-01',
-            name: 'Beatriz Santos',
-            email: 'beatriz.santos@student.easyenglish.edu',
-            role: 'student',
-            status: 'active',
-            timezone: 'America/Sao_Paulo',
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-          {
-            uid: 'demo-student-02',
-            name: 'Lucas Moreira',
-            email: 'lucas.moreira@student.easyenglish.edu',
-            role: 'student',
-            status: 'active',
-            timezone: 'America/Sao_Paulo',
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-        ]);
-      }
-    } catch (e) {
-      console.warn('User management preview note:', e);
-      setUsers([
-        {
-          uid: 'demo-admin-01',
-          name: 'Helena Rocha (Admin)',
-          email: 'admin.helena@easyenglish.edu',
-          role: 'admin',
-          status: 'active',
-          timezone: 'America/Sao_Paulo',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-        {
-          uid: 'demo-teacher-01',
-          name: 'Prof. Michael Davies',
-          email: 'michael.davies@easyenglish.edu',
-          role: 'teacher',
-          status: 'active',
-          timezone: 'America/Sao_Paulo',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-        {
-          uid: 'demo-student-01',
-          name: 'Beatriz Santos',
-          email: 'beatriz.santos@student.easyenglish.edu',
-          role: 'student',
-          status: 'active',
-          timezone: 'America/Sao_Paulo',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-      ]);
+      const invitationList: UserInvitation[] = [];
+      invitationSnap.forEach((d) => invitationList.push(d.data() as UserInvitation));
+      setUsers(list);
+      setInvitations(invitationList);
+    } catch (err) {
+      setUsers([]);
+      setInvitations([]);
+      error('Não foi possível carregar os usuários', String(err));
     } finally {
       setLoading(false);
     }
@@ -192,70 +135,71 @@ export const UserManagement: React.FC = () => {
 
   const handleCreateTeacher = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!teacherName || !teacherEmail) {
+    if (!inviteName || !inviteEmail) {
       error('Preencha nome e e-mail');
       return;
     }
 
     try {
       setIsSubmitting(true);
-      const newUid = `teacher-${Math.random().toString(36).substring(2, 9)}`;
-      const newUser: User = {
-        uid: newUid,
-        name: teacherName,
-        email: teacherEmail,
-        role: 'teacher',
-        status: 'active',
-        timezone: 'America/Sao_Paulo',
+      const normalizedEmail = inviteEmail.trim().toLowerCase();
+      if (users.some((user) => user.email.toLowerCase() === normalizedEmail)) {
+        error('Este e-mail já possui uma conta na plataforma.');
+        return;
+      }
+      if (invitations.some((invitation) => invitation.email === normalizedEmail)) {
+        error('Já existe um convite pendente para este e-mail.');
+        return;
+      }
+
+      const invitation: UserInvitation = {
+        name: inviteName,
+        email: normalizedEmail,
+        role: inviteRole,
+        specialties: inviteRole === 'teacher'
+          ? specialties.split(',').map((specialty) => specialty.trim()).filter(Boolean)
+          : [],
         createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        createdBy: 'admin-portal',
       };
 
-      await setDoc(doc(db, 'users', newUid), {
-        ...newUser,
+      await setDoc(doc(db, 'userInvitations', normalizedEmail), {
+        ...invitation,
+        createdBy: currentUser?.uid,
         createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
       });
 
-      await setDoc(doc(db, 'teacherProfiles', newUid), {
-        teacherId: newUid,
-        bio: 'Professor de inglês credenciado pela coordenação acadêmica.',
-        specialties: specialties.split(',').map((s) => s.trim()),
-        languages: ['Inglês', 'Português'],
-        timezone: 'America/Sao_Paulo',
-        bookingSettings: {
-          slotDurationMinutes: 45,
-          advanceNoticeHours: 12,
-          cancellationNoticeHours: 24,
-          maxAdvanceDays: 30,
-        },
-        isAcceptingStudents: true,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-
-      // Audit log
       await setDoc(doc(db, 'auditLogs', `log-${Date.now()}`), {
-        actorId: 'admin',
-        actorName: 'Coordenação Pedagógica',
-        action: 'CREATE_TEACHER',
-        entityType: 'users',
-        entityId: newUid,
-        targetUserId: newUid,
-        metadata: { name: teacherName, email: teacherEmail },
+        actorId: currentUser?.uid,
+        actorName: currentUser?.name || 'Administrador',
+        action: inviteRole === 'teacher' ? 'INVITE_TEACHER' : 'INVITE_STUDENT',
+        entityType: 'userInvitations',
+        entityId: normalizedEmail,
+        metadata: { name: inviteName, email: normalizedEmail, role: inviteRole },
         createdAt: new Date().toISOString(),
       });
 
-      setUsers((prev) => [newUser, ...prev]);
-      setIsCreateTeacherOpen(false);
-      setTeacherName('');
-      setTeacherEmail('');
-      success('Professor cadastrado!', 'Conta docente e perfil acadêmico gerados.');
+      setInvitations((previous) => [invitation, ...previous]);
+      setIsCreateInvitationOpen(false);
+      setInviteName('');
+      setInviteEmail('');
+      success(
+        'Convite criado',
+        `Peça para ${normalizedEmail} entrar com a própria conta Google para ativar o perfil de ${inviteRole === 'teacher' ? 'professor' : 'aluno'}.`
+      );
     } catch (err) {
       error('Erro ao cadastrar professor', String(err));
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleCancelInvitation = async (email: string) => {
+    try {
+      await deleteDoc(doc(db, 'userInvitations', email));
+      setInvitations((previous) => previous.filter((invitation) => invitation.email !== email));
+      success('Convite cancelado.');
+    } catch (err) {
+      error('Não foi possível cancelar o convite', String(err));
     }
   };
 
@@ -279,10 +223,10 @@ export const UserManagement: React.FC = () => {
         </div>
         <Button
           size="sm"
-          onClick={() => setIsCreateTeacherOpen(true)}
+          onClick={() => setIsCreateInvitationOpen(true)}
           leftIcon={<UserPlus className="w-3.5 h-3.5" />}
         >
-          Novo Professor
+          Convidar Usuário
         </Button>
       </div>
 
@@ -398,42 +342,93 @@ export const UserManagement: React.FC = () => {
         </table>
       </div>
 
-      {/* Modal: Create Teacher */}
+      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
+        <div className="border-b border-slate-100 px-4 py-3">
+          <h2 className="text-sm font-bold text-slate-900">Convites pendentes</h2>
+          <p className="mt-1 text-xs text-slate-500">
+            O acesso será ativado quando a pessoa entrar com a própria conta Google.
+          </p>
+        </div>
+        {invitations.length ? (
+          <ul className="divide-y divide-slate-100">
+            {invitations.map((invitation) => (
+              <li key={invitation.email} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+                <div>
+                  <p className="text-xs font-semibold text-slate-900">{invitation.name}</p>
+                  <p className="mt-0.5 text-[11px] text-slate-500">{invitation.email}</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Badge variant={invitation.role === 'teacher' ? 'emerald' : 'blue'}>
+                    {invitation.role === 'teacher' ? 'Professor' : 'Aluno'}
+                  </Badge>
+                  <Badge variant="amber">Aguardando primeiro acesso</Badge>
+                  <button
+                    type="button"
+                    onClick={() => handleCancelInvitation(invitation.email)}
+                    className="text-xs font-medium text-slate-500 transition-colors hover:text-rose-600"
+                  >
+                    Cancelar convite
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="px-4 py-5 text-xs text-slate-400">
+            {loading ? 'Carregando convites...' : 'Nenhum convite pendente.'}
+          </p>
+        )}
+      </section>
+
+      {/* Modal: Create invitation */}
       <Modal
-        isOpen={isCreateTeacherOpen}
-        onClose={() => setIsCreateTeacherOpen(false)}
-        title="Cadastrar Novo Professor"
-        description="O professor receberá permissões pedagógicas para criar cursos, gerenciar materiais e agendar aulas."
+        isOpen={isCreateInvitationOpen}
+        onClose={() => setIsCreateInvitationOpen(false)}
+        title="Convidar usuário"
+        description="O convidado deve entrar com uma conta Google que use o mesmo e-mail informado."
       >
         <form onSubmit={handleCreateTeacher} className="space-y-4">
           <Input
-            label="Nome Completo do Docente"
-            placeholder="Ex: Profa. Elena Rostova"
-            value={teacherName}
-            onChange={(e) => setTeacherName(e.target.value)}
+            label="Nome completo"
+            placeholder="Ex.: Elena Rostova"
+            value={inviteName}
+            onChange={(e) => setInviteName(e.target.value)}
             required
           />
           <Input
-            label="E-mail Institucional"
+            label="E-mail da conta Google"
             type="email"
-            placeholder="Ex: elena.rostova@fluently.edu"
-            value={teacherEmail}
-            onChange={(e) => setTeacherEmail(e.target.value)}
+            placeholder="Ex.: elena@escola.com"
+            value={inviteEmail}
+            onChange={(e) => setInviteEmail(e.target.value)}
             required
           />
-          <Input
-            label="Especialidades Pedagógicas (separadas por vírgula)"
-            placeholder="Ex: TOEFL iBT, Accent Reduction, Business English"
-            value={specialties}
-            onChange={(e) => setSpecialties(e.target.value)}
-          />
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-slate-700">Perfil de acesso</label>
+            <select
+              value={inviteRole}
+              onChange={(event) => setInviteRole(event.target.value as 'teacher' | 'student')}
+              className="w-full rounded-lg border border-slate-300 bg-white p-2 text-xs"
+            >
+              <option value="teacher">Professor</option>
+              <option value="student">Aluno</option>
+            </select>
+          </div>
+          {inviteRole === 'teacher' && (
+            <Input
+              label="Especialidades pedagógicas (separadas por vírgula)"
+              placeholder="Ex.: TOEFL, Conversação, Business English"
+              value={specialties}
+              onChange={(e) => setSpecialties(e.target.value)}
+            />
+          )}
 
           <div className="flex justify-end gap-2 pt-4">
-            <Button variant="ghost" type="button" onClick={() => setIsCreateTeacherOpen(false)}>
+            <Button variant="ghost" type="button" onClick={() => setIsCreateInvitationOpen(false)}>
               Cancelar
             </Button>
             <Button type="submit" isLoading={isSubmitting}>
-              Cadastrar Professor
+              Criar convite
             </Button>
           </div>
         </form>

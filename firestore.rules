@@ -2,176 +2,244 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // Default deny catch-all
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
-    // Helper Functions
-    function isSignedIn() {
+    function signedIn() {
       return request.auth != null;
     }
 
-    function isUser(uid) {
-      return isSignedIn() && request.auth.uid == uid;
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
     }
 
-    function isBootstrapAdmin() {
-      return isSignedIn() && (
-        request.auth.token.email == "luan.c.oliveira11@gmail.com"
-      );
+    function bootstrapAdmin() {
+      return signedIn()
+        && request.auth.token.email == "luan.c.oliveira11@gmail.com"
+        && request.auth.token.email_verified == true;
     }
 
     function isAdmin() {
-      return isBootstrapAdmin() || (
-        isSignedIn() &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin"
-      );
+      return bootstrapAdmin()
+        || (signedIn()
+          && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+          && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin");
     }
 
     function isTeacher() {
-      return isAdmin() || (
-        isSignedIn() &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "teacher"
-      );
+      return isAdmin()
+        || (signedIn()
+          && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+          && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "teacher");
     }
 
-    // MANDATORY CONNECTION TEST (mandated by Firebase skill)
+    function managesTeacher(teacherId) {
+      return isAdmin() || (isTeacher() && request.auth.uid == teacherId);
+    }
+
+    function managesCourse(courseId) {
+      return isAdmin()
+        || (isTeacher()
+          && get(/databases/$(database)/documents/courses/$(courseId)).data.teacherId == request.auth.uid);
+    }
+
+    function createsTeacherProfile(teacherId) {
+      return isAdmin()
+        || (isSelf(teacherId)
+          && getAfter(/databases/$(database)/documents/users/$(teacherId)).data.role == "teacher");
+    }
+
+    function invitedAs(role) {
+      return signedIn()
+        && request.auth.token.email is string
+        && exists(/databases/$(database)/documents/userInvitations/$(request.auth.token.email))
+        && get(/databases/$(database)/documents/userInvitations/$(request.auth.token.email)).data.role == role;
+    }
+
     match /test/{docId} {
-      allow read: if true;
+      allow get: if signedIn();
     }
 
-    // USERS COLLECTION
     match /users/{userId} {
-      allow get: if true;
-      allow list: if true;
-      
-      // Public registration: can register as student or admin can create users
-      allow create: if isAdmin() || (
-        isSignedIn() && request.auth.uid == userId
-      ) || (
-        // Allow initial seed of demo users
-        request.resource.data.role == "student" ||
-        request.resource.data.role == "teacher" ||
-        request.resource.data.role == "admin"
-      );
-
-      // Self update: can update profile fields, but CANNOT escalate role or status unless admin
-      allow update: if isAdmin() || (
-        isSignedIn() && request.auth.uid == userId
-      );
-
+      allow get: if isSelf(userId) || isAdmin() || isTeacher();
+      allow list: if isAdmin() || isTeacher();
+      allow create: if isAdmin()
+        || (isSelf(userId)
+          && request.auth.token.email_verified == true
+          && request.resource.data.email == request.auth.token.email
+          && (request.resource.data.role == "student" || invitedAs(request.resource.data.role)));
+      allow update: if isAdmin()
+        || (isSelf(userId)
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["name", "photoURL", "timezone", "updatedAt"]));
       allow delete: if isAdmin();
     }
 
-    // TEACHER PROFILES
+    match /userInvitations/{email} {
+      allow get: if isAdmin() || (signedIn() && request.auth.token.email == email);
+      allow list: if isAdmin();
+      allow create, update: if isAdmin()
+        && request.resource.data.email == email
+        && request.resource.data.role in ["teacher", "student"];
+      allow delete: if isAdmin() || (signedIn() && request.auth.token.email == email);
+    }
+
     match /teacherProfiles/{teacherId} {
-      allow read: if true;
-      allow create, update: if isAdmin() || (isTeacher() && request.auth.uid == teacherId) || true;
+      allow read: if signedIn();
+      allow create: if createsTeacherProfile(teacherId);
+      allow update: if managesTeacher(teacherId);
       allow delete: if isAdmin();
     }
 
-    // STUDENT PROFILES
     match /studentProfiles/{studentId} {
-      allow read: if true;
-      allow create, update: if isAdmin() || isTeacher() || isUser(studentId) || true;
+      allow read: if isSelf(studentId) || isAdmin() || isTeacher();
+      allow create: if isAdmin() || isSelf(studentId);
+      allow update: if isAdmin()
+        || (isSelf(studentId)
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["englishLevel", "learningGoals", "updatedAt"]));
       allow delete: if isAdmin();
     }
 
-    // TEACHER STUDENT RELATIONSHIPS
     match /teacherStudentRelationships/{relationshipId} {
-      allow read: if true;
-      allow create, update: if isAdmin() || isTeacher() || true;
-      allow delete: if isAdmin();
+      allow read: if signedIn();
+      allow create: if isAdmin()
+        || (isTeacher()
+          && request.resource.data.teacherId == request.auth.uid
+          && request.resource.data.status == "active");
+      allow update, delete: if isAdmin();
     }
 
-    // COURSES
     match /courses/{courseId} {
-      allow read: if true;
-      allow create: if isTeacher() || isAdmin() || true;
-      allow update, delete: if isAdmin() || isTeacher();
+      allow read: if signedIn();
+      allow create: if isTeacher() && request.resource.data.teacherId == request.auth.uid;
+      allow update: if managesTeacher(resource.data.teacherId)
+        && request.resource.data.teacherId == resource.data.teacherId;
+      allow delete: if managesTeacher(resource.data.teacherId);
     }
 
-    // MODULES
     match /modules/{moduleId} {
-      allow read: if true;
-      allow create, update, delete: if isTeacher() || isAdmin() || true;
+      allow read: if signedIn();
+      allow create: if managesCourse(request.resource.data.courseId);
+      allow update: if managesCourse(resource.data.courseId)
+        && request.resource.data.courseId == resource.data.courseId;
+      allow delete: if managesCourse(resource.data.courseId);
     }
 
-    // LESSONS
     match /lessons/{lessonId} {
-      allow read: if true;
-      allow create, update, delete: if isTeacher() || isAdmin() || true;
+      allow read: if signedIn();
+      allow create: if managesCourse(request.resource.data.courseId)
+        && request.resource.data.teacherId == request.auth.uid;
+      allow update: if managesCourse(resource.data.courseId)
+        && request.resource.data.courseId == resource.data.courseId
+        && (isAdmin() || request.resource.data.teacherId == request.auth.uid);
+      allow delete: if managesCourse(resource.data.courseId);
     }
 
-    // LEARNING ASSETS
     match /learningAssets/{assetId} {
-      allow read: if true;
-      allow create, update, delete: if isTeacher() || isAdmin() || true;
+      allow read: if signedIn();
+      allow create: if managesTeacher(request.resource.data.teacherId);
+      allow update: if managesTeacher(resource.data.teacherId)
+        && request.resource.data.teacherId == resource.data.teacherId;
+      allow delete: if managesTeacher(resource.data.teacherId);
     }
 
-    // ASSESSMENTS
     match /assessments/{assessmentId} {
-      allow read: if true;
-      allow create, update, delete: if isTeacher() || isAdmin() || true;
+      allow read: if isAdmin()
+        || (isTeacher() && resource.data.teacherId == request.auth.uid)
+        || (signedIn() && resource.data.status == "published");
+      allow create: if isTeacher() && request.resource.data.teacherId == request.auth.uid;
+      allow update: if managesTeacher(resource.data.teacherId)
+        && request.resource.data.teacherId == resource.data.teacherId;
+      allow delete: if managesTeacher(resource.data.teacherId);
     }
 
-    // ASSESSMENT RESULTS
     match /assessmentResults/{resultId} {
-      allow read: if true;
-      allow create, update: if isSignedIn() || isAdmin() || true;
+      allow read: if isAdmin()
+        || (signedIn()
+          && (resource.data.studentId == request.auth.uid
+            || resource.data.teacherId == request.auth.uid));
+      allow create: if isSelf(request.resource.data.studentId)
+        && request.resource.data.status == "submitted";
+      allow update: if isAdmin()
+        || (isTeacher()
+          && resource.data.teacherId == request.auth.uid
+          && request.resource.data.teacherId == resource.data.teacherId);
       allow delete: if isAdmin();
     }
 
-    // AVAILABILITY SLOTS
     match /availabilitySlots/{slotId} {
-      allow read: if true;
-      allow create, update, delete: if isTeacher() || isAdmin() || true;
+      allow read: if signedIn();
+      allow create: if isTeacher() && request.resource.data.teacherId == request.auth.uid;
+      allow update: if managesTeacher(resource.data.teacherId)
+          && request.resource.data.teacherId == resource.data.teacherId
+        || (signedIn()
+          && resource.data.status == "available"
+          && request.resource.data.status == "booked"
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["status", "updatedAt"]));
+      allow delete: if managesTeacher(resource.data.teacherId);
     }
 
-    // BOOKINGS
     match /bookings/{bookingId} {
-      allow read: if true;
-      allow create, update: if isSignedIn() || isAdmin() || true;
+      allow read: if isAdmin()
+        || (signedIn()
+          && (resource.data.studentId == request.auth.uid
+            || resource.data.teacherId == request.auth.uid));
+      allow create: if isSelf(request.resource.data.studentId)
+        && request.resource.data.status == "pending";
+      allow update: if isAdmin()
+        || (isTeacher()
+          && resource.data.teacherId == request.auth.uid
+          && request.resource.data.teacherId == resource.data.teacherId
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["status", "updatedAt", "notes", "calendarSyncStatus",
+              "zoomMeetingId", "zoomJoinUrl", "zoomStartUrl"]))
+        || (isSelf(resource.data.studentId)
+          && request.resource.data.studentId == resource.data.studentId
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["status", "updatedAt"]));
       allow delete: if isAdmin();
     }
 
-    // MEDIA ASSETS
     match /mediaAssets/{mediaId} {
-      allow read: if true;
-      allow create, update, delete: if isTeacher() || isAdmin() || true;
+      allow read: if signedIn();
+      allow create: if isTeacher() && request.resource.data.teacherId == request.auth.uid;
+      allow update, delete: if managesTeacher(resource.data.teacherId);
     }
 
-    // STORAGE QUOTAS
     match /storageQuotas/{quotaId} {
-      allow read: if true;
-      allow write: if isAdmin() || isTeacher() || true;
+      allow read: if isAdmin() || (isTeacher() && quotaId == request.auth.uid);
+      allow write: if isAdmin() || (isTeacher() && quotaId == request.auth.uid);
     }
 
-    // INTEGRATION CONNECTIONS
     match /integrationConnections/{connectionId} {
-      allow read, write: if isSignedIn() || isAdmin();
+      allow read: if isAdmin() || (signedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isSelf(request.resource.data.userId);
+      allow update: if isSelf(resource.data.userId)
+        && request.resource.data.userId == resource.data.userId;
+      allow delete: if isAdmin() || isSelf(resource.data.userId);
     }
 
-    // CALENDAR EVENTS
     match /calendarEvents/{eventId} {
-      allow read, write: if isSignedIn() || isAdmin();
+      allow read: if isAdmin() || (signedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isSelf(request.resource.data.userId);
+      allow update, delete: if isAdmin() || isSelf(resource.data.userId);
     }
 
-    // NOTIFICATIONS
     match /notifications/{notificationId} {
-      allow read: if true;
-      allow create, update, delete: if true;
+      allow read: if isAdmin() || (signedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isAdmin()
+        || (isTeacher() && request.resource.data.userId is string)
+        || isSelf(request.resource.data.userId);
+      allow update: if isAdmin()
+        || (isSelf(resource.data.userId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["readAt"]));
+      allow delete: if isAdmin() || isSelf(resource.data.userId);
     }
 
-    // AUDIT LOGS
     match /auditLogs/{logId} {
-      allow read: if true;
-      allow create: if true;
-      allow update, delete: if false; // Immutable audit trail
+      allow read: if isAdmin();
+      allow create: if isAdmin()
+        || (signedIn() && request.resource.data.actorId == request.auth.uid);
+      allow update, delete: if false;
     }
   }
 }
